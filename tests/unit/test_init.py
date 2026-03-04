@@ -14,4 +14,4 @@ def test_version_is_semver() -> None:
 def test_version_value() -> None:
     from reeln import __version__
 
-    assert __version__ == "0.0.23"
+    assert __version__ == "0.0.24"
