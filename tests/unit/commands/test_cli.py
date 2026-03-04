@@ -33,7 +33,7 @@ def test_version() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.23" in result.output
+    assert "reeln 0.0.24" in result.output
     assert "ffmpeg 7.1 (/usr/bin/ffmpeg)" in result.output
 
 
@@ -44,7 +44,7 @@ def test_version_ffmpeg_not_found() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.23" in result.output
+    assert "reeln 0.0.24" in result.output
     assert "ffmpeg: not found" in result.output
 
 
@@ -87,7 +87,7 @@ def test_version_plugin_discovery_error() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.23" in result.output
+    assert "reeln 0.0.24" in result.output
     assert "plugins:" not in result.output
 
 
