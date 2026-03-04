@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.24] - 2026-03-04
+
+### Fixed
+- Registry URL casing — `raw.githubusercontent.com` is case-sensitive (`StreamnDad` not `streamn-dad`)
+- mypy errors in `prompts.py` (renamed shadowed variables)
+- CI workflows use `uv sync` instead of `uv pip install --system` (PEP 668)
+- Plugin registry: correct homepage URL and metadata for `streamn-scoreboard`
+
 ## [0.0.23] - 2026-03-03
 
 First feature-complete release of reeln — platform-agnostic CLI toolkit for livestreamers.
