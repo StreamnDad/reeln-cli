@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
+from reeln import __version__
 from reeln.cli import app
 from reeln.core.errors import FFmpegError
 from reeln.models.config import AppConfig
@@ -33,7 +34,7 @@ def test_version() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.24" in result.output
+    assert f"reeln {__version__}" in result.output
     assert "ffmpeg 7.1 (/usr/bin/ffmpeg)" in result.output
 
 
@@ -44,7 +45,7 @@ def test_version_ffmpeg_not_found() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.24" in result.output
+    assert f"reeln {__version__}" in result.output
     assert "ffmpeg: not found" in result.output
 
 
@@ -87,7 +88,7 @@ def test_version_plugin_discovery_error() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "reeln 0.0.24" in result.output
+    assert f"reeln {__version__}" in result.output
     assert "plugins:" not in result.output
 
 

@@ -11,7 +11,7 @@ def test_version_is_semver() -> None:
     assert re.match(r"^\d+\.\d+\.\d+$", __version__)
 
 
-def test_version_value() -> None:
+def test_version_not_empty() -> None:
     from reeln import __version__
 
-    assert __version__ == "0.0.24"
+    assert len(__version__) > 0
