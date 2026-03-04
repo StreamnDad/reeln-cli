@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+*.whl
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Media — prevent accidental video commits
+*.mkv
+*.mp4
+*.mov
+*.avi
+*.webm
+*.ts
+
+# Project artifacts
+secrets/
+output/
+.tmp/
+
+# Sphinx docs build
+docs/_build/
+
+# AI dev docs — dev-only, not tracked
+CLAUDE.md
+AGENTS.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*

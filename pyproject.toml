@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reeln"
+dynamic = ["version"]
+description = "Platform-agnostic CLI toolkit for livestreamers"
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12.3",
+    "filelock>=3.0",
+]
+
+[project.optional-dependencies]
+interactive = [
+    "questionary>=2.0.1",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "ruff",
+    "mypy",
+    "questionary>=2.0.1",
+]
+docs = [
+    "sphinx>=7.0",
+    "myst-parser>=3.0",
+    "furo>=2024.1",
+    "sphinx-copybutton>=0.5",
+]
+
+[project.scripts]
+reeln = "reeln.cli:app"
+
+[project.entry-points."reeln.plugins"]
+
+[tool.hatch.version]
+path = "reeln/__init__.py"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008"]  # typer.Option() in function defaults is the standard Typer pattern
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "typer.*"
+implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = "questionary.*"
+ignore_missing_imports = true

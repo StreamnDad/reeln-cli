@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv pip install --system -e ".[dev,interactive]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type check
+        run: mypy reeln/
+
+      - name: Test
+        run: python -m pytest tests/ -n auto --cov=reeln --cov-branch --cov-fail-under=100 -m "not integration" -q
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
