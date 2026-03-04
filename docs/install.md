@@ -22,7 +22,7 @@ uv tool install reeln
 ### Development install
 
 ```bash
-git clone https://github.com/streamn-dad/reeln-cli.git
+git clone https://github.com/StreamnDad/reeln-cli.git
 cd reeln-cli
 make dev-install
 ```

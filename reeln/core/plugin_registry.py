@@ -28,7 +28,7 @@ from reeln.models.plugin import (
 
 log: logging.Logger = get_logger(__name__)
 
-DEFAULT_REGISTRY_URL: str = "https://raw.githubusercontent.com/streamn-dad/reeln-cli/main/registry/plugins.json"
+DEFAULT_REGISTRY_URL: str = "https://raw.githubusercontent.com/StreamnDad/reeln-cli/main/registry/plugins.json"
 
 _CACHE_TTL_SECONDS: int = 3600
 _FETCH_TIMEOUT_SECONDS: int = 10
