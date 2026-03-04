@@ -23,16 +23,16 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv pip install --system -e ".[dev,interactive]"
+        run: uv venv && uv pip install -e ".[dev,interactive]"
 
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
 
       - name: Type check
-        run: mypy reeln/
+        run: uv run mypy reeln/
 
       - name: Test
-        run: python -m pytest tests/ -n auto --cov=reeln --cov-branch --cov-fail-under=100 -m "not integration" -q
+        run: uv run python -m pytest tests/ -n auto --cov=reeln --cov-branch --cov-fail-under=100 -m "not integration" -q
 
       - name: Build
         run: uv build
