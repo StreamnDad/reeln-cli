@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.27] - 2026-03-04
+
+### Fixed
+- PyPI logo: restore absolute URL for README image (lost during merge)
+
 ## [0.0.26] - 2026-03-04
 
 ### Added
