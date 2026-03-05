@@ -84,7 +84,11 @@ reeln plugins install youtube --installer uv
 | `--dry-run` | Preview the install command without executing |
 | `--installer` | Force a specific installer (`pip` or `uv`) |
 
-After installation, the plugin is automatically enabled in your config. The installer is auto-detected: `uv` is preferred when available, otherwise falls back to `pip`. On permission failures, the command auto-retries with `--user`.
+After installation, the plugin is automatically enabled in your config.
+
+**Install source:** When a plugin's registry entry has a GitHub or GitLab homepage, the install uses `git+{homepage}` (e.g. `git+https://github.com/StreamnDad/reeln-plugin-streamn-scoreboard`). Plugins without a git homepage fall back to the PyPI package name.
+
+The installer is auto-detected: `uv` is preferred when available, otherwise falls back to `pip`. On permission failures, the command auto-retries with `--user`.
 
 ### `reeln plugins update`
 
@@ -180,6 +184,19 @@ reeln exposes lifecycle hooks that plugins can subscribe to:
 | `ON_SEGMENT_START` | Before segment file I/O begins |
 | `ON_SEGMENT_COMPLETE` | After segment merge and state update |
 | `ON_ERROR` | When an error occurs in core operations |
+
+Hooks receive a `HookContext` with three fields:
+
+- `hook` — the hook type (e.g. `Hook.ON_GAME_INIT`)
+- `data` — read-only data from core (game directory, team profiles, etc.)
+- `shared` — writable dict for plugins to pass data back to core
+
+```python
+def on_game_init(context: HookContext) -> None:
+    game_dir = context.data["game_dir"]
+    # Write data back — core persists shared["livestreams"] to game.json
+    context.shared["livestreams"] = {"youtube": "https://..."}
+```
 
 ## Capability protocols
 

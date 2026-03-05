@@ -289,6 +289,8 @@ Priority order (highest wins):
 4. `REELN_PROFILE` env var
 5. Default XDG path (`config.json`)
 
+This priority applies to both reading and writing. When a command modifies config (e.g. `reeln plugins enable`), the changes are written back to the same resolved path.
+
 ```bash
 # Use a specific config file
 export REELN_CONFIG=~/projects/tournament/reeln.json
