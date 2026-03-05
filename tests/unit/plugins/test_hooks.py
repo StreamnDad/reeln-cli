@@ -41,6 +41,7 @@ def test_hook_context_defaults() -> None:
     ctx = HookContext(hook=Hook.PRE_RENDER)
     assert ctx.hook is Hook.PRE_RENDER
     assert ctx.data == {}
+    assert ctx.shared == {}
 
 
 def test_hook_context_with_data() -> None:
@@ -56,6 +57,38 @@ def test_hook_context_is_frozen() -> None:
         raise AssertionError("Should not allow mutation")
     except AttributeError:
         pass
+
+
+def test_hook_context_shared_mutable_despite_frozen() -> None:
+    """Dict contents are mutable even though the dataclass is frozen."""
+    ctx = HookContext(hook=Hook.ON_GAME_INIT)
+    ctx.shared["livestreams"] = {"google": "https://youtube.com/live/abc123"}
+    assert ctx.shared["livestreams"]["google"] == "https://youtube.com/live/abc123"
+
+
+def test_hook_context_shared_survives_emit_cycle() -> None:
+    """Shared dict written by one handler is visible to subsequent handlers."""
+    from reeln.plugins.registry import HookRegistry
+
+    results: list[str] = []
+
+    def handler_a(context: HookContext) -> None:
+        context.shared["livestreams"] = context.shared.get("livestreams", {})
+        context.shared["livestreams"]["google"] = "https://youtube.com/live/abc"
+
+    def handler_b(context: HookContext) -> None:
+        url = context.shared.get("livestreams", {}).get("google", "")
+        results.append(url)
+
+    registry = HookRegistry()
+    registry.register(Hook.ON_GAME_INIT, handler_a)
+    registry.register(Hook.ON_GAME_INIT, handler_b)
+
+    ctx = HookContext(hook=Hook.ON_GAME_INIT)
+    registry.emit(Hook.ON_GAME_INIT, ctx)
+
+    assert results == ["https://youtube.com/live/abc"]
+    assert ctx.shared["livestreams"]["google"] == "https://youtube.com/live/abc"
 
 
 # ---------------------------------------------------------------------------

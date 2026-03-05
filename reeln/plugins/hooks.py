@@ -29,6 +29,7 @@ class HookContext:
 
     hook: Hook
     data: dict[str, Any] = field(default_factory=dict)
+    shared: dict[str, Any] = field(default_factory=dict)
 
 
 class HookHandler(Protocol):

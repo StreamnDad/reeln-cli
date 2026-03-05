@@ -264,11 +264,12 @@ class PipResult:
 def detect_installer() -> list[str]:
     """Detect the best available installer.
 
-    Returns the command prefix: ``["uv", "pip", "install"]`` if uv is
-    available, otherwise ``[sys.executable, "-m", "pip", "install"]``.
+    Returns the command prefix targeting the *running* Python environment
+    so that plugins are installed alongside reeln-cli (even when reeln is
+    a uv tool and cwd contains a different ``.venv``).
     """
     if shutil.which("uv"):
-        return ["uv", "pip", "install"]
+        return ["uv", "pip", "install", "--python", sys.executable]
     return [sys.executable, "-m", "pip", "install"]
 
 
@@ -403,15 +404,14 @@ def install_plugin(
     result = _run_pip([target], dry_run=dry_run, installer=installer)
 
     # Verify the package is actually installed (uv can return 0 for no-ops)
-    if result.success and not dry_run:
-        if not get_installed_version(entry.package):
-            return PipResult(
-                success=False,
-                package=entry.package,
-                action="install",
-                error=f"Package '{entry.package}' not found after install. "
-                f"Check that the repository has a valid Python package.",
-            )
+    if result.success and not dry_run and not get_installed_version(entry.package):
+        return PipResult(
+            success=False,
+            package=entry.package,
+            action="install",
+            error=f"Package '{entry.package}' not found after install. "
+            f"Check that the repository has a valid Python package.",
+        )
     return result
 
 

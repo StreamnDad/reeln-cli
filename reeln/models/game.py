@@ -58,6 +58,7 @@ class GameState:
     finished_at: str = ""
     renders: list[RenderEntry] = field(default_factory=list)
     events: list[GameEvent] = field(default_factory=list)
+    livestreams: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,7 @@ def game_state_to_dict(state: GameState) -> dict[str, Any]:
         "finished_at": state.finished_at,
         "renders": [render_entry_to_dict(r) for r in state.renders],
         "events": [game_event_to_dict(e) for e in state.events],
+        "livestreams": dict(state.livestreams),
     }
 
 
@@ -172,4 +174,5 @@ def dict_to_game_state(data: dict[str, Any]) -> GameState:
         finished_at=str(data.get("finished_at", "")),
         renders=[dict_to_render_entry(r) for r in renders_raw],
         events=[dict_to_game_event(e) for e in events_raw],
+        livestreams=dict(data.get("livestreams", {})),
     )

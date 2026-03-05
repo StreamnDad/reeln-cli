@@ -145,6 +145,18 @@ def test_game_state_defaults() -> None:
     assert gs.events == []
 
 
+def test_game_state_livestreams_default() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="generic")
+    gs = GameState(game_info=gi)
+    assert gs.livestreams == {}
+
+
+def test_game_state_with_livestreams() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, livestreams={"google": "https://youtube.com/live/abc123"})
+    assert gs.livestreams == {"google": "https://youtube.com/live/abc123"}
+
+
 def test_game_state_custom() -> None:
     gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
     gs = GameState(
@@ -511,6 +523,20 @@ def test_game_state_to_dict() -> None:
     assert d["events"] == []
 
 
+def test_game_state_to_dict_with_livestreams() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, livestreams={"google": "https://youtube.com/live/abc123"})
+    d = game_state_to_dict(gs)
+    assert d["livestreams"] == {"google": "https://youtube.com/live/abc123"}
+
+
+def test_game_state_to_dict_livestreams_empty() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi)
+    d = game_state_to_dict(gs)
+    assert d["livestreams"] == {}
+
+
 def test_game_state_to_dict_with_finished_at() -> None:
     gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
     gs = GameState(
@@ -587,6 +613,33 @@ def test_dict_to_game_state_defaults() -> None:
     assert gs.finished_at == ""
     assert gs.renders == []
     assert gs.events == []
+
+
+def test_dict_to_game_state_with_livestreams() -> None:
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+        "livestreams": {"google": "https://youtube.com/live/abc123"},
+    }
+    gs = dict_to_game_state(d)
+    assert gs.livestreams == {"google": "https://youtube.com/live/abc123"}
+
+
+def test_dict_to_game_state_livestreams_missing() -> None:
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+    }
+    gs = dict_to_game_state(d)
+    assert gs.livestreams == {}
 
 
 def test_dict_to_game_state_with_finished_at() -> None:
@@ -691,5 +744,6 @@ def test_game_state_round_trip() -> None:
         finished_at="2026-03-01T20:00:00+00:00",
         renders=[entry],
         events=[ev],
+        livestreams={"google": "https://youtube.com/live/abc123"},
     )
     assert dict_to_game_state(game_state_to_dict(gs)) == gs

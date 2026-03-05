@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.26] - 2026-03-04
+
+### Added
+- `HookContext.shared` dict for plugins to pass data back (e.g. livestream URLs)
+- `GameState.livestreams` field — persists livestream URLs written by hook plugins
+- `resolve_config_path()` — extracted config path resolution for reuse
+
+### Fixed
+- Plugin install now uses `git+{homepage}` for GitHub/GitLab plugins instead of PyPI lookup
+- Post-install verification catches silent `uv pip install` no-ops
+- `save_config()` now respects `REELN_CONFIG` / `REELN_PROFILE` env vars (previously always wrote to default path)
+- `detect_installer()` passes `--python sys.executable` to uv so plugins install into the correct environment
+- Hardcoded version strings removed from tests (use `__version__` dynamically)
+
 ## [0.0.25] - 2026-03-04
 
 ### Fixed

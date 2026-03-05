@@ -493,7 +493,8 @@ def test_build_plugin_status_no_update_when_same_version() -> None:
 def test_detect_installer_uv_found() -> None:
     with patch("reeln.core.plugin_registry.shutil.which", return_value="/usr/bin/uv"):
         result = detect_installer()
-    assert result == ["uv", "pip", "install"]
+    assert result[:3] == ["uv", "pip", "install"]
+    assert "--python" in result
 
 
 def test_detect_installer_uv_not_found() -> None:

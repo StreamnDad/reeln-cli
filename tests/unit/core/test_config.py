@@ -800,6 +800,65 @@ def test_save_config_cleans_up_on_error(tmp_path: Path) -> None:
     assert tmp_files == []
 
 
+def test_save_config_respects_reeln_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    env_path = tmp_path / "custom" / "config.json"
+    monkeypatch.setenv("REELN_CONFIG", str(env_path))
+
+    save_config(AppConfig())
+
+    assert env_path.is_file()
+    data = json.loads(env_path.read_text())
+    assert "config_version" in data
+
+
+def test_save_config_respects_reeln_profile_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REELN_PROFILE", "game")
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+
+    expected = default_config_path("game")
+    result = save_config(AppConfig(), path=expected)
+
+    assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# resolve_config_path
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_config_path_explicit_wins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from reeln.core.config import resolve_config_path
+
+    monkeypatch.setenv("REELN_CONFIG", "/should/be/ignored")
+    explicit = tmp_path / "explicit.json"
+    assert resolve_config_path(path=explicit) == explicit
+
+
+def test_resolve_config_path_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from reeln.core.config import resolve_config_path
+
+    env_path = tmp_path / "env.json"
+    monkeypatch.setenv("REELN_CONFIG", str(env_path))
+    assert resolve_config_path() == env_path
+
+
+def test_resolve_config_path_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reeln.core.config import resolve_config_path
+
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.delenv("REELN_PROFILE", raising=False)
+    result = resolve_config_path(profile="game")
+    assert result == default_config_path("game")
+
+
+def test_resolve_config_path_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reeln.core.config import resolve_config_path
+
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.delenv("REELN_PROFILE", raising=False)
+    assert resolve_config_path() == default_config_path()
+
+
 # ---------------------------------------------------------------------------
 # validate_plugin_configs
 # ---------------------------------------------------------------------------
