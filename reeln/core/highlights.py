@@ -167,10 +167,15 @@ def init_game(
     if away_profile is not None:
         hook_data["away_profile"] = away_profile
 
-    get_registry().emit(
-        Hook.ON_GAME_INIT,
-        HookContext(hook=Hook.ON_GAME_INIT, data=hook_data),
-    )
+    ctx = HookContext(hook=Hook.ON_GAME_INIT, data=hook_data)
+    get_registry().emit(Hook.ON_GAME_INIT, ctx)
+
+    # Persist livestream URLs written by plugins (e.g. Google, Meta)
+    livestreams = ctx.shared.get("livestreams", {})
+    if livestreams:
+        state = load_game_state(game_dir)
+        state.livestreams = dict(livestreams)
+        save_game_state(state, game_dir)
 
     messages.append(f"Created {_GAME_STATE_FILE}")
     log.info("Game initialized: %s", game_dir)

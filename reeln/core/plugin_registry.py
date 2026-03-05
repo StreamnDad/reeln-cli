@@ -264,11 +264,12 @@ class PipResult:
 def detect_installer() -> list[str]:
     """Detect the best available installer.
 
-    Returns the command prefix: ``["uv", "pip", "install"]`` if uv is
-    available, otherwise ``[sys.executable, "-m", "pip", "install"]``.
+    Returns the command prefix targeting the *running* Python environment
+    so that plugins are installed alongside reeln-cli (even when reeln is
+    a uv tool and cwd contains a different ``.venv``).
     """
     if shutil.which("uv"):
-        return ["uv", "pip", "install"]
+        return ["uv", "pip", "install", "--python", sys.executable]
     return [sys.executable, "-m", "pip", "install"]
 
 

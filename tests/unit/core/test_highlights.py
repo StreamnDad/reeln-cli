@@ -1031,6 +1031,30 @@ def test_init_game_dry_run_no_hook(tmp_path: Path) -> None:
     assert len(emitted) == 0
 
 
+def test_init_game_persists_livestreams(tmp_path: Path) -> None:
+    """Livestream URLs written to context.shared by plugins are saved to game.json."""
+
+    def fake_plugin(ctx: HookContext) -> None:
+        ctx.shared["livestreams"] = {"google": "https://youtube.com/live/abc123"}
+
+    get_registry().register(Hook.ON_GAME_INIT, fake_plugin)
+
+    info = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    game_dir, _ = init_game(tmp_path, info)
+
+    state = load_game_state(game_dir)
+    assert state.livestreams == {"google": "https://youtube.com/live/abc123"}
+
+
+def test_init_game_no_livestreams_no_extra_save(tmp_path: Path) -> None:
+    """When no plugin writes livestreams, game.json is not re-saved."""
+    info = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    game_dir, _ = init_game(tmp_path, info)
+
+    state = load_game_state(game_dir)
+    assert state.livestreams == {}
+
+
 def test_create_events_emits_on_event_created(tmp_path: Path) -> None:
     game_dir = tmp_path / "game"
     game_dir.mkdir()

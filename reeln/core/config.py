@@ -338,6 +338,30 @@ def validate_plugin_configs(settings: dict[str, dict[str, Any]]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def resolve_config_path(
+    path: Path | None = None,
+    profile: str | None = None,
+) -> Path:
+    """Resolve the config file path using the standard priority order.
+
+    Priority:
+    1. ``path`` argument (e.g. ``--config`` CLI flag)
+    2. ``REELN_CONFIG`` environment variable
+    3. ``profile`` argument (e.g. ``--profile`` CLI flag)
+    4. ``REELN_PROFILE`` environment variable
+    5. Default XDG path (``~/.config/reeln/config.json``)
+    """
+    if path is None:
+        env_config = os.environ.get("REELN_CONFIG")
+        if env_config:
+            path = Path(env_config).expanduser()
+    if path is None and profile is None:
+        env_profile = os.environ.get("REELN_PROFILE")
+        if env_profile:
+            profile = env_profile
+    return path or default_config_path(profile)
+
+
 def load_config(
     path: Path | None = None,
     profile: str | None = None,
@@ -355,16 +379,7 @@ def load_config(
     """
     base = config_to_dict(default_config())
 
-    # Resolve config file: explicit path → env var → profile → default
-    if path is None:
-        env_config = os.environ.get("REELN_CONFIG")
-        if env_config:
-            path = Path(env_config).expanduser()
-    if path is None and profile is None:
-        env_profile = os.environ.get("REELN_PROFILE")
-        if env_profile:
-            profile = env_profile
-    file_path = path or default_config_path(profile)
+    file_path = resolve_config_path(path, profile)
     if file_path.is_file():
         try:
             raw = json.loads(file_path.read_text(encoding="utf-8"))
@@ -392,8 +407,11 @@ def save_config(config: AppConfig, path: Path | None = None) -> Path:
     """Atomically write config to disk.
 
     Uses tempfile + ``Path.replace()`` to prevent corruption.
+    Respects ``REELN_CONFIG`` / ``REELN_PROFILE`` env vars when no
+    explicit *path* is given, matching the resolution order of
+    :func:`load_config`.
     """
-    file_path = path or default_config_path()
+    file_path = resolve_config_path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     data = config_to_dict(config)
