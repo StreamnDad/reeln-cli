@@ -71,7 +71,8 @@ Install a plugin from the registry.
 
 ```bash
 reeln plugins install youtube
-reeln plugins install youtube --dry-run
+reeln plugins install youtube --version 0.1.0
+reeln plugins install youtube --version 0.1.0 --dry-run
 reeln plugins install youtube --installer uv
 ```
 
@@ -81,6 +82,7 @@ reeln plugins install youtube --installer uv
 
 | Option | Description |
 |---|---|
+| `--version` / `-V` | Version to install (e.g. `0.1.0`, `v0.1.0`) |
 | `--dry-run` | Preview the install command without executing |
 | `--installer` | Force a specific installer (`pip` or `uv`) |
 
@@ -96,6 +98,7 @@ Update a plugin or all installed plugins.
 
 ```bash
 reeln plugins update youtube
+reeln plugins update youtube --version 2.0.0
 reeln plugins update
 reeln plugins update --dry-run
 reeln plugins update --installer pip
@@ -107,6 +110,7 @@ reeln plugins update --installer pip
 
 | Option | Description |
 |---|---|
+| `--version` / `-V` | Version to update to (e.g. `0.1.0`, `v0.1.0`) |
 | `--dry-run` | Preview the update command without executing |
 | `--installer` | Force a specific installer (`pip` or `uv`) |
 

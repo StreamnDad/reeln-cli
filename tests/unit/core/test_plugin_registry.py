@@ -677,6 +677,38 @@ def test_resolve_install_target_non_git_homepage_falls_back_to_package() -> None
     assert _resolve_install_target(entry) == "reeln-custom"
 
 
+def test_resolve_install_target_github_with_version() -> None:
+    entry = RegistryEntry(
+        name="scoreboard",
+        package="reeln-plugin-scoreboard",
+        homepage="https://github.com/StreamnDad/reeln-plugin-scoreboard",
+    )
+    assert _resolve_install_target(entry, "0.1.0") == (
+        "git+https://github.com/StreamnDad/reeln-plugin-scoreboard@v0.1.0"
+    )
+
+
+def test_resolve_install_target_github_with_v_prefix() -> None:
+    entry = RegistryEntry(
+        name="scoreboard",
+        package="reeln-plugin-scoreboard",
+        homepage="https://github.com/StreamnDad/reeln-plugin-scoreboard",
+    )
+    assert _resolve_install_target(entry, "v0.1.0") == (
+        "git+https://github.com/StreamnDad/reeln-plugin-scoreboard@v0.1.0"
+    )
+
+
+def test_resolve_install_target_pypi_with_version() -> None:
+    entry = RegistryEntry(name="youtube", package="reeln-youtube")
+    assert _resolve_install_target(entry, "0.1.0") == "reeln-youtube==0.1.0"
+
+
+def test_resolve_install_target_pypi_with_v_prefix() -> None:
+    entry = RegistryEntry(name="youtube", package="reeln-youtube")
+    assert _resolve_install_target(entry, "v0.1.0") == "reeln-youtube==0.1.0"
+
+
 # ---------------------------------------------------------------------------
 # Install / update
 # ---------------------------------------------------------------------------
@@ -734,6 +766,28 @@ def test_install_plugin_verification_fails() -> None:
     assert "not found after install" in result.error
 
 
+def test_install_plugin_with_version() -> None:
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = "Installed"
+    proc.stderr = ""
+
+    with (
+        patch("reeln.core.plugin_registry.subprocess.run", return_value=proc) as mock_run,
+        patch("reeln.core.plugin_registry.get_installed_version", return_value="1.0.0"),
+    ):
+        result = install_plugin("youtube", _SAMPLE_ENTRIES, version="1.0.0")
+    assert result.success is True
+    cmd = mock_run.call_args[0][0]
+    assert any("reeln-youtube==1.0.0" in arg for arg in cmd)
+
+
+def test_install_plugin_dry_run_with_version() -> None:
+    result = install_plugin("youtube", _SAMPLE_ENTRIES, dry_run=True, version="2.0.0")
+    assert result.success is True
+    assert "reeln-youtube==2.0.0" in result.output
+
+
 def test_install_plugin_uses_git_homepage() -> None:
     """Plugins with GitHub homepage install via git+URL."""
     entries = [
@@ -770,6 +824,19 @@ def test_update_plugin_success() -> None:
     assert result.success is True
     assert result.action == "update"
     assert result.package == "reeln-youtube"
+
+
+def test_update_plugin_with_version() -> None:
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = "Updated"
+    proc.stderr = ""
+
+    with patch("reeln.core.plugin_registry.subprocess.run", return_value=proc) as mock_run:
+        result = update_plugin("youtube", _SAMPLE_ENTRIES, version="2.0.0")
+    assert result.success is True
+    cmd = mock_run.call_args[0][0]
+    assert any("reeln-youtube==2.0.0" in arg for arg in cmd)
 
 
 def test_update_plugin_not_in_registry() -> None:

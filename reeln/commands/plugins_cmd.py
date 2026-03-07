@@ -154,6 +154,7 @@ def install(
     name: str = typer.Argument(..., help="Plugin name to install."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without installing."),
     installer: str = typer.Option("", "--installer", help="Force installer (pip, uv)."),
+    version: str = typer.Option("", "--version", "-V", help="Version to install (e.g. 0.1.0, v0.1.0)."),
 ) -> None:
     """Install a plugin from the registry."""
     config = load_config()
@@ -164,7 +165,7 @@ def install(
         raise typer.Exit(1) from exc
 
     try:
-        result = install_plugin(name, entries, dry_run=dry_run, installer=installer)
+        result = install_plugin(name, entries, dry_run=dry_run, installer=installer, version=version)
     except RegistryError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -194,6 +195,7 @@ def update(
     name: str = typer.Argument("", help="Plugin to update (empty = all)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without updating."),
     installer: str = typer.Option("", "--installer", help="Force installer (pip, uv)."),
+    version: str = typer.Option("", "--version", "-V", help="Version to update to (e.g. 0.1.0, v0.1.0)."),
 ) -> None:
     """Update a plugin or all installed plugins."""
     config = load_config()
@@ -206,7 +208,7 @@ def update(
     if name:
         # Update single plugin
         try:
-            result = update_plugin(name, entries, dry_run=dry_run, installer=installer)
+            result = update_plugin(name, entries, dry_run=dry_run, installer=installer, version=version)
         except RegistryError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(1) from exc

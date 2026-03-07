@@ -356,6 +356,24 @@ def test_plugins_install_registry_error() -> None:
     assert result.exit_code == 1
 
 
+def test_plugins_install_with_version() -> None:
+    entries = [RegistryEntry(name="youtube", package="reeln-youtube")]
+    pip_result = PipResult(success=True, package="reeln-youtube", action="install", output="ok")
+    config = AppConfig()
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=config),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.install_plugin", return_value=pip_result) as mock_install,
+        patch("reeln.commands.plugins_cmd.save_config"),
+    ):
+        result = runner.invoke(app, ["plugins", "install", "youtube", "--version", "1.2.0"])
+    assert result.exit_code == 0
+    assert "installed successfully" in result.output
+    mock_install.assert_called_once_with(
+        "youtube", entries, dry_run=False, installer="", version="1.2.0",
+    )
+
+
 def test_plugins_install_auto_enables_removes_from_disabled() -> None:
     entries = [RegistryEntry(name="youtube", package="reeln-youtube")]
     pip_result = PipResult(success=True, package="reeln-youtube", action="install", output="ok")
@@ -389,6 +407,22 @@ def test_plugins_update_single_success() -> None:
         result = runner.invoke(app, ["plugins", "update", "youtube"])
     assert result.exit_code == 0
     assert "updated successfully" in result.output
+
+
+def test_plugins_update_with_version() -> None:
+    entries = [RegistryEntry(name="youtube", package="reeln-youtube")]
+    pip_result = PipResult(success=True, package="reeln-youtube", action="update", output="ok")
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.update_plugin", return_value=pip_result) as mock_update,
+    ):
+        result = runner.invoke(app, ["plugins", "update", "youtube", "--version", "2.0.0"])
+    assert result.exit_code == 0
+    assert "updated successfully" in result.output
+    mock_update.assert_called_once_with(
+        "youtube", entries, dry_run=False, installer="", version="2.0.0",
+    )
 
 
 def test_plugins_update_single_failure() -> None:

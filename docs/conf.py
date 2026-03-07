@@ -60,8 +60,12 @@ intersphinx_mapping = {
 
 html_theme = "furo"
 html_title = "reeln"
+html_static_path = ["_static"]
+html_logo = "_static/logo.jpg"
+html_favicon = "_static/logo.jpg"
 html_theme_options = {
     "source_repository": "https://github.com/StreamnDad/reeln-cli",
     "source_branch": "main",
     "source_directory": "docs/",
+    "sidebar_hide_name": True,
 }

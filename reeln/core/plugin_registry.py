@@ -379,16 +379,25 @@ def _resolve_package(name: str, entries: list[RegistryEntry]) -> str:
     return _resolve_entry(name, entries).package
 
 
-def _resolve_install_target(entry: RegistryEntry) -> str:
+def _resolve_install_target(entry: RegistryEntry, version: str = "") -> str:
     """Return the pip install target for a registry entry.
 
     Uses ``git+{homepage}`` when the homepage is a GitHub/GitLab URL,
-    otherwise falls back to the PyPI package name.
+    otherwise falls back to the PyPI package name.  When *version* is
+    provided, appends ``@v<version>`` (git) or ``==<version>`` (PyPI).
     """
     homepage = entry.homepage
     if homepage and ("github.com/" in homepage or "gitlab.com/" in homepage):
-        return f"git+{homepage}"
-    return entry.package
+        target = f"git+{homepage}"
+        if version:
+            tag = version if version.startswith("v") else f"v{version}"
+            target = f"{target}@{tag}"
+        return target
+    target = entry.package
+    if version:
+        ver = version.lstrip("v")
+        target = f"{target}=={ver}"
+    return target
 
 
 def install_plugin(
@@ -397,10 +406,11 @@ def install_plugin(
     *,
     dry_run: bool = False,
     installer: str = "",
+    version: str = "",
 ) -> PipResult:
     """Install a plugin by name using the registry to resolve the package."""
     entry = _resolve_entry(name, entries)
-    target = _resolve_install_target(entry)
+    target = _resolve_install_target(entry, version)
     result = _run_pip([target], dry_run=dry_run, installer=installer)
 
     # Verify the package is actually installed (uv can return 0 for no-ops)
@@ -421,10 +431,11 @@ def update_plugin(
     *,
     dry_run: bool = False,
     installer: str = "",
+    version: str = "",
 ) -> PipResult:
-    """Update a plugin to the latest version."""
+    """Update a plugin to the latest or a specific version."""
     entry = _resolve_entry(name, entries)
-    target = _resolve_install_target(entry)
+    target = _resolve_install_target(entry, version)
     result = _run_pip(["--upgrade", target], dry_run=dry_run, installer=installer)
     result = PipResult(
         success=result.success,
