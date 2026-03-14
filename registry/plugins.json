@@ -15,9 +15,9 @@
       "name": "google",
       "package": "reeln-plugin-google",
       "description": "Google platform integration — YouTube livestream creation, uploads, playlists, and comments",
-      "capabilities": ["hook:ON_GAME_INIT", "hook:ON_GAME_READY"],
+      "capabilities": ["hook:ON_GAME_INIT", "hook:ON_GAME_READY", "hook:ON_GAME_FINISH", "hook:ON_POST_GAME_FINISH", "hook:ON_HIGHLIGHTS_MERGED", "hook:POST_RENDER"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-google",
-      "min_reeln_version": "0.0.19",
+      "min_reeln_version": "0.0.31",
       "author": "StreamnDad",
       "license": "AGPL-3.0"
     },
@@ -25,9 +25,9 @@
       "name": "meta",
       "package": "reeln-plugin-meta",
       "description": "Meta platform integration — Facebook Live, Instagram, and Threads",
-      "capabilities": ["hook:ON_GAME_INIT", "hook:ON_GAME_READY"],
+      "capabilities": ["hook:ON_GAME_INIT", "hook:ON_GAME_READY", "hook:ON_GAME_FINISH"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-meta",
-      "min_reeln_version": "0.0.19",
+      "min_reeln_version": "0.0.31",
       "author": "StreamnDad",
       "license": "AGPL-3.0"
     },
