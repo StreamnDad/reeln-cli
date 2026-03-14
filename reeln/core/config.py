@@ -371,15 +371,21 @@ def resolve_config_path(
     4. ``REELN_PROFILE`` environment variable
     5. Default XDG path (``~/.config/reeln/config.json``)
     """
-    if path is None:
-        env_config = os.environ.get("REELN_CONFIG")
-        if env_config:
-            path = Path(env_config).expanduser()
-    if path is None and profile is None:
-        env_profile = os.environ.get("REELN_PROFILE")
-        if env_profile:
-            profile = env_profile
-    return path or default_config_path(profile)
+    # Explicit arguments take priority over env vars
+    if path is not None:
+        return path
+    if profile is not None:
+        return default_config_path(profile)
+
+    # Fall through to env vars
+    env_config = os.environ.get("REELN_CONFIG")
+    if env_config:
+        return Path(env_config).expanduser()
+    env_profile = os.environ.get("REELN_PROFILE")
+    if env_profile:
+        return default_config_path(env_profile)
+
+    return default_config_path()
 
 
 def load_config(
