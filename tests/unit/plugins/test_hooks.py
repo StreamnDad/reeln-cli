@@ -18,6 +18,7 @@ def test_hook_values() -> None:
     assert Hook.ON_GAME_INIT.value == "on_game_init"
     assert Hook.ON_GAME_READY.value == "on_game_ready"
     assert Hook.ON_GAME_FINISH.value == "on_game_finish"
+    assert Hook.ON_POST_GAME_FINISH.value == "on_post_game_finish"
     assert Hook.ON_HIGHLIGHTS_MERGED.value == "on_highlights_merged"
     assert Hook.ON_SEGMENT_START.value == "on_segment_start"
     assert Hook.ON_SEGMENT_COMPLETE.value == "on_segment_complete"
@@ -25,7 +26,7 @@ def test_hook_values() -> None:
 
 
 def test_hook_enum_count() -> None:
-    assert len(Hook) == 12
+    assert len(Hook) == 13
 
 
 def test_hook_members_unique() -> None:

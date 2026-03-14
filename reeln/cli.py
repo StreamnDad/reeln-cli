@@ -82,9 +82,21 @@ def main(
         envvar="REELN_LOG_FORMAT",
         help="Log output format: human or json.",
     ),
+    log_level: str = typer.Option(
+        "WARNING",
+        "--log-level",
+        envvar="REELN_LOG_LEVEL",
+        help="Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+    ),
 ) -> None:
     """Platform-agnostic CLI toolkit for livestreamers."""
-    setup_logging(log_format=log_format)
+    import logging
+
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        typer.echo(f"Invalid log level: {log_level}", err=True)
+        raise typer.Exit(code=2)
+    setup_logging(level=numeric_level, log_format=log_format)
 
 
 @app.command()

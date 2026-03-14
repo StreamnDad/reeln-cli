@@ -43,10 +43,15 @@ def finish_game(
         from reeln.plugins.hooks import Hook, HookContext
         from reeln.plugins.registry import get_registry
 
-        get_registry().emit(
-            Hook.ON_GAME_FINISH,
-            HookContext(hook=Hook.ON_GAME_FINISH, data={"game_dir": game_dir, "state": state}),
+        hook_data = {"game_dir": game_dir, "state": state}
+        ctx = HookContext(hook=Hook.ON_GAME_FINISH, data=hook_data)
+        get_registry().emit(Hook.ON_GAME_FINISH, ctx)
+
+        # Second pass — plugins read what others wrote during FINISH
+        post_ctx = HookContext(
+            hook=Hook.ON_POST_GAME_FINISH, data=hook_data, shared=ctx.shared
         )
+        get_registry().emit(Hook.ON_POST_GAME_FINISH, post_ctx)
 
         log.info("Game finished: %s", game_dir)
 

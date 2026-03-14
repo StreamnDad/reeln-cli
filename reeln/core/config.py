@@ -150,6 +150,7 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
         or config.plugins.disabled
         or config.plugins.settings
         or config.plugins.registry_url
+        or not config.plugins.enforce_hooks
     )
     if full or has_plugins:
         settings = dict(config.plugins.settings)
@@ -162,6 +163,7 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
             "disabled": list(config.plugins.disabled),
             "settings": settings,
             "registry_url": config.plugins.registry_url,
+            "enforce_hooks": config.plugins.enforce_hooks,
         }
 
     return d
@@ -225,6 +227,7 @@ def dict_to_config(data: dict[str, Any]) -> AppConfig:
             disabled=list(raw_plugins.get("disabled", [])),
             settings=dict(raw_plugins.get("settings", {})),
             registry_url=str(raw_plugins.get("registry_url", "")),
+            enforce_hooks=bool(raw_plugins.get("enforce_hooks", True)),
         )
 
     return AppConfig(

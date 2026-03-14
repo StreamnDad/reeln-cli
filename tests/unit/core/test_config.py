@@ -404,6 +404,7 @@ def test_config_to_dict_full_includes_all_sections() -> None:
         "disabled": [],
         "settings": {},
         "registry_url": "",
+        "enforce_hooks": True,
     }
 
 
@@ -496,6 +497,18 @@ def test_dict_to_config_plugins_with_registry_url() -> None:
     d = {"plugins": {"registry_url": "https://example.com/reg.json"}}
     cfg = dict_to_config(d)
     assert cfg.plugins.registry_url == "https://example.com/reg.json"
+
+
+def test_dict_to_config_plugins_enforce_hooks_false() -> None:
+    d = {"plugins": {"enforce_hooks": False}}
+    cfg = dict_to_config(d)
+    assert cfg.plugins.enforce_hooks is False
+
+
+def test_dict_to_config_plugins_enforce_hooks_default_true() -> None:
+    d = {"plugins": {}}
+    cfg = dict_to_config(d)
+    assert cfg.plugins.enforce_hooks is True
 
 
 def test_dict_to_config_plugins_not_dict_ignored() -> None:

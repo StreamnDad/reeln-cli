@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from reeln.plugins.hooks import Hook, HookContext
-from reeln.plugins.registry import HookRegistry, get_registry, reset_registry
+from reeln.plugins.registry import FilteredRegistry, HookRegistry, get_registry, reset_registry
 
 # ---------------------------------------------------------------------------
 # HookRegistry
@@ -133,3 +133,56 @@ def test_reset_registry_when_none() -> None:
     """reset_registry is safe to call even when no registry exists."""
     reset_registry()
     reset_registry()  # double-reset should not raise
+
+
+# ---------------------------------------------------------------------------
+# FilteredRegistry
+# ---------------------------------------------------------------------------
+
+
+def test_filtered_registry_allows_declared_hook() -> None:
+    backing = HookRegistry()
+    filtered = FilteredRegistry(backing, {Hook.ON_GAME_INIT}, "myplugin")
+    calls: list[HookContext] = []
+    filtered.register(Hook.ON_GAME_INIT, calls.append)
+
+    backing.emit(Hook.ON_GAME_INIT, HookContext(hook=Hook.ON_GAME_INIT))
+    assert len(calls) == 1
+
+
+def test_filtered_registry_blocks_undeclared_hook() -> None:
+    backing = HookRegistry()
+    filtered = FilteredRegistry(backing, {Hook.ON_GAME_INIT}, "myplugin")
+    calls: list[HookContext] = []
+    filtered.register(Hook.ON_ERROR, calls.append)
+
+    backing.emit(Hook.ON_ERROR, HookContext(hook=Hook.ON_ERROR))
+    assert len(calls) == 0
+
+
+def test_filtered_registry_delegates_emit() -> None:
+    backing = HookRegistry()
+    calls: list[HookContext] = []
+    backing.register(Hook.PRE_RENDER, calls.append)
+
+    filtered = FilteredRegistry(backing, {Hook.PRE_RENDER}, "myplugin")
+    filtered.emit(Hook.PRE_RENDER, HookContext(hook=Hook.PRE_RENDER))
+    assert len(calls) == 1
+
+
+def test_filtered_registry_delegates_has_handlers() -> None:
+    backing = HookRegistry()
+    backing.register(Hook.PRE_RENDER, lambda ctx: None)
+
+    filtered = FilteredRegistry(backing, {Hook.PRE_RENDER}, "myplugin")
+    assert filtered.has_handlers(Hook.PRE_RENDER) is True
+    assert filtered.has_handlers(Hook.ON_ERROR) is False
+
+
+def test_filtered_registry_delegates_clear() -> None:
+    backing = HookRegistry()
+    backing.register(Hook.PRE_RENDER, lambda ctx: None)
+
+    filtered = FilteredRegistry(backing, {Hook.PRE_RENDER}, "myplugin")
+    filtered.clear()
+    assert backing.has_handlers(Hook.PRE_RENDER) is False

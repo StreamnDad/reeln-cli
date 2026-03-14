@@ -226,8 +226,11 @@ The `plugins` section controls plugin discovery and per-plugin settings:
 | `disabled` | `[]` | List of plugin names to disable |
 | `settings` | `{}` | Per-plugin configuration passed during instantiation |
 | `registry_url` | `""` | Custom plugin registry URL (empty = default GitHub URL) |
+| `enforce_hooks` | `true` | Restrict plugins to hooks declared in the registry (set `false` for local plugin development) |
 
 When `enabled` is empty, all discovered plugins are loaded except those in `disabled`. When `enabled` is non-empty, only those named plugins are loaded (minus any in `disabled`).
+
+When `enforce_hooks` is `true` (the default), plugins may only register hooks declared in their registry entry. Undeclared hooks are silently blocked with a warning log. Set to `false` during local plugin development to bypass enforcement.
 
 ## Plugin config schemas
 
@@ -261,6 +264,23 @@ Config schema:
   playlist_id: str  — Default playlist for uploads
   privacy: str [default: unlisted]  — Video privacy setting
 ```
+
+## Logging
+
+The default log level is `WARNING`. Override it with `--log-level` or the `REELN_LOG_LEVEL` environment variable:
+
+```bash
+# CLI flag
+reeln game init --log-level DEBUG ...
+
+# Environment variable
+export REELN_LOG_LEVEL=DEBUG
+reeln game init ...
+```
+
+Valid levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` (case-insensitive).
+
+The log output format is controlled by `--log-format` / `REELN_LOG_FORMAT` (default: `human`). Set to `json` for structured logging in CI/automation.
 
 ## Environment variable overrides
 

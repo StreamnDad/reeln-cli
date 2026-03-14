@@ -52,6 +52,48 @@ class HookRegistry:
         self._handlers.clear()
 
 
+class FilteredRegistry(HookRegistry):
+    """Registry wrapper that only allows registration for declared hooks.
+
+    Undeclared hooks are silently blocked with a warning log.
+    Emit and other read operations delegate to the backing registry.
+    """
+
+    def __init__(
+        self,
+        backing: HookRegistry,
+        allowed_hooks: set[Hook],
+        plugin_name: str,
+    ) -> None:
+        super().__init__()
+        self._backing = backing
+        self._allowed = allowed_hooks
+        self._plugin_name = plugin_name
+
+    def register(self, hook: Hook, handler: HandlerFunc) -> None:  # type: ignore[override]
+        """Register a handler only if the hook is in the allowed set."""
+        if hook not in self._allowed:
+            log.warning(
+                "Plugin %s tried to register undeclared hook %s, skipping",
+                self._plugin_name,
+                hook.value,
+            )
+            return
+        self._backing.register(hook, handler)
+
+    def emit(self, hook: Hook, context: HookContext | None = None) -> None:
+        """Delegate to the backing registry."""
+        self._backing.emit(hook, context)
+
+    def has_handlers(self, hook: Hook) -> bool:
+        """Delegate to the backing registry."""
+        return self._backing.has_handlers(hook)
+
+    def clear(self) -> None:
+        """Delegate to the backing registry."""
+        self._backing.clear()
+
+
 def get_registry() -> HookRegistry:
     """Return the module-level singleton registry."""
     global _registry

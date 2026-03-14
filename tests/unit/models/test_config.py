@@ -79,6 +79,7 @@ def test_plugins_config_defaults() -> None:
     assert pc.disabled == []
     assert pc.settings == {}
     assert pc.registry_url == ""
+    assert pc.enforce_hooks is True
 
 
 def test_plugins_config_custom() -> None:
@@ -95,6 +96,11 @@ def test_plugins_config_custom() -> None:
 def test_plugins_config_registry_url() -> None:
     pc = PluginsConfig(registry_url="https://example.com/reg.json")
     assert pc.registry_url == "https://example.com/reg.json"
+
+
+def test_plugins_config_enforce_hooks_false() -> None:
+    pc = PluginsConfig(enforce_hooks=False)
+    assert pc.enforce_hooks is False
 
 
 def test_app_config_with_orchestration() -> None:

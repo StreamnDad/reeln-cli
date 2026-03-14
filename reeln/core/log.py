@@ -61,7 +61,7 @@ class HumanFormatter(logging.Formatter):
         super().__init__(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
 
 
-def setup_logging(level: int = logging.INFO, log_format: str = "human") -> None:
+def setup_logging(level: int = logging.WARNING, log_format: str = "human") -> None:
     """Configure the root logger with the specified format.
 
     Clears existing handlers and writes to stderr.

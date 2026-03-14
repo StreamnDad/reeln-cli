@@ -183,7 +183,9 @@ reeln exposes lifecycle hooks that plugins can subscribe to:
 | `ON_EVENT_CREATED` | When a new event is registered |
 | `ON_EVENT_TAGGED` | When an event is tagged or updated |
 | `ON_GAME_INIT` | After a game directory is created |
+| `ON_GAME_READY` | After all `ON_GAME_INIT` hooks complete (cross-plugin data flow) |
 | `ON_GAME_FINISH` | After a game is marked as finished |
+| `ON_POST_GAME_FINISH` | After all `ON_GAME_FINISH` hooks complete (cross-plugin data flow) |
 | `ON_HIGHLIGHTS_MERGED` | After game highlights are merged |
 | `ON_SEGMENT_START` | Before segment file I/O begins |
 | `ON_SEGMENT_COMPLETE` | After segment merge and state update |

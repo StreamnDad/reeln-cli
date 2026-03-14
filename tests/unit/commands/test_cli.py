@@ -146,6 +146,57 @@ def test_log_format_envvar(monkeypatch: object) -> None:
 
 
 # ---------------------------------------------------------------------------
+# --log-level
+# ---------------------------------------------------------------------------
+
+
+def test_log_level_debug() -> None:
+    result = runner.invoke(app, ["--log-level", "DEBUG", "--help"])
+    assert result.exit_code == 0
+
+
+def test_log_level_info() -> None:
+    result = runner.invoke(app, ["--log-level", "INFO", "--help"])
+    assert result.exit_code == 0
+
+
+def test_log_level_warning() -> None:
+    result = runner.invoke(app, ["--log-level", "WARNING", "--help"])
+    assert result.exit_code == 0
+
+
+def test_log_level_error() -> None:
+    result = runner.invoke(app, ["--log-level", "ERROR", "--help"])
+    assert result.exit_code == 0
+
+
+def test_log_level_case_insensitive() -> None:
+    result = runner.invoke(app, ["--log-level", "debug", "--help"])
+    assert result.exit_code == 0
+
+
+def test_log_level_invalid() -> None:
+    result = runner.invoke(app, ["--log-level", "BOGUS", "config", "show"])
+    assert result.exit_code == 2
+    assert "Invalid log level" in result.output
+
+
+def test_log_level_envvar() -> None:
+    import os
+
+    old = os.environ.get("REELN_LOG_LEVEL")
+    try:
+        os.environ["REELN_LOG_LEVEL"] = "DEBUG"
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+    finally:
+        if old is None:
+            os.environ.pop("REELN_LOG_LEVEL", None)
+        else:
+            os.environ["REELN_LOG_LEVEL"] = old
+
+
+# ---------------------------------------------------------------------------
 # reeln doctor
 # ---------------------------------------------------------------------------
 

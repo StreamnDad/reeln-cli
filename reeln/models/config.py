@@ -40,6 +40,7 @@ class PluginsConfig:
     disabled: list[str] = field(default_factory=list)
     settings: dict[str, dict[str, Any]] = field(default_factory=dict)
     registry_url: str = ""
+    enforce_hooks: bool = True
 
 
 @dataclass

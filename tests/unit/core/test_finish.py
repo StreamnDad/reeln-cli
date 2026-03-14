@@ -162,6 +162,51 @@ def test_finish_game_emits_on_game_finish(tmp_path: Path) -> None:
     assert emitted[0].data["state"].finished is True
 
 
+def test_finish_game_emits_on_post_game_finish(tmp_path: Path) -> None:
+    state = _make_state(segments_processed=[1])
+    _write_state(tmp_path, state)
+
+    emitted: list[HookContext] = []
+    get_registry().register(Hook.ON_POST_GAME_FINISH, emitted.append)
+
+    finish_game(tmp_path)
+
+    assert len(emitted) == 1
+    assert emitted[0].hook is Hook.ON_POST_GAME_FINISH
+    assert "game_dir" in emitted[0].data
+    assert "state" in emitted[0].data
+
+
+def test_finish_game_post_finish_shares_context(tmp_path: Path) -> None:
+    """ON_POST_GAME_FINISH receives shared context from ON_GAME_FINISH handlers."""
+    state = _make_state()
+    _write_state(tmp_path, state)
+
+    def finish_handler(ctx: HookContext) -> None:
+        ctx.shared["game_events"] = ["goal", "save"]
+
+    post_received: list[HookContext] = []
+    get_registry().register(Hook.ON_GAME_FINISH, finish_handler)
+    get_registry().register(Hook.ON_POST_GAME_FINISH, post_received.append)
+
+    finish_game(tmp_path)
+
+    assert len(post_received) == 1
+    assert post_received[0].shared["game_events"] == ["goal", "save"]
+
+
+def test_finish_game_dry_run_no_post_hook(tmp_path: Path) -> None:
+    state = _make_state()
+    _write_state(tmp_path, state)
+
+    emitted: list[HookContext] = []
+    get_registry().register(Hook.ON_POST_GAME_FINISH, emitted.append)
+
+    finish_game(tmp_path, dry_run=True)
+
+    assert len(emitted) == 0
+
+
 def test_finish_game_dry_run_no_hook(tmp_path: Path) -> None:
     state = _make_state()
     _write_state(tmp_path, state)

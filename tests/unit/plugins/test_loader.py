@@ -15,6 +15,8 @@ from reeln.models.plugin import GeneratorResult
 from reeln.plugins.hooks import Hook, HookContext
 from reeln.plugins.loader import (
     _detect_capabilities,
+    _fetch_registry_capabilities,
+    _parse_allowed_hooks,
     _register_plugin_hooks,
     activate_plugins,
     discover_plugins,
@@ -411,6 +413,142 @@ def test_activate_plugins_empty_config() -> None:
         result = activate_plugins(PluginsConfig())
 
     assert result == {}
+    reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# _parse_allowed_hooks
+# ---------------------------------------------------------------------------
+
+
+def test_parse_allowed_hooks_single() -> None:
+    result = _parse_allowed_hooks(["hook:ON_GAME_INIT"])
+    assert result == {Hook.ON_GAME_INIT}
+
+
+def test_parse_allowed_hooks_multiple() -> None:
+    result = _parse_allowed_hooks(["hook:ON_GAME_INIT", "hook:ON_GAME_READY"])
+    assert result == {Hook.ON_GAME_INIT, Hook.ON_GAME_READY}
+
+
+def test_parse_allowed_hooks_ignores_non_hook_caps() -> None:
+    result = _parse_allowed_hooks(["generator", "uploader"])
+    assert result is None
+
+
+def test_parse_allowed_hooks_ignores_invalid_hook_name() -> None:
+    result = _parse_allowed_hooks(["hook:DOES_NOT_EXIST"])
+    assert result is None
+
+
+def test_parse_allowed_hooks_empty_list() -> None:
+    result = _parse_allowed_hooks([])
+    assert result is None
+
+
+def test_parse_allowed_hooks_mixed_valid_and_invalid() -> None:
+    result = _parse_allowed_hooks(["hook:ON_GAME_INIT", "hook:FAKE", "generator"])
+    assert result == {Hook.ON_GAME_INIT}
+
+
+# ---------------------------------------------------------------------------
+# _fetch_registry_capabilities
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_registry_capabilities_success() -> None:
+    from reeln.models.plugin import RegistryEntry
+
+    entries = [
+        RegistryEntry(name="google", capabilities=["hook:ON_GAME_INIT", "hook:ON_GAME_READY"]),
+        RegistryEntry(name="meta", capabilities=["hook:ON_GAME_INIT"]),
+    ]
+    with patch("reeln.core.plugin_registry.fetch_registry", return_value=entries):
+        result = _fetch_registry_capabilities("https://example.com/registry.json")
+    assert result == {
+        "google": ["hook:ON_GAME_INIT", "hook:ON_GAME_READY"],
+        "meta": ["hook:ON_GAME_INIT"],
+    }
+
+
+def test_fetch_registry_capabilities_failure() -> None:
+    with patch(
+        "reeln.core.plugin_registry.fetch_registry",
+        side_effect=Exception("network error"),
+    ):
+        result = _fetch_registry_capabilities("https://example.com/registry.json")
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# _register_plugin_hooks with allowed_hooks
+# ---------------------------------------------------------------------------
+
+
+def test_register_plugin_hooks_with_allowed_hooks_blocks_undeclared() -> None:
+    """Auto-discovered hooks not in allowed set are blocked."""
+    registry = HookRegistry()
+    plugin = _AutoDiscoverPlugin()
+    _register_plugin_hooks(
+        "auto", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT}
+    )
+
+    # ON_GAME_INIT is allowed
+    assert registry.has_handlers(Hook.ON_GAME_INIT)
+    # PRE_RENDER is NOT allowed — should be blocked
+    assert not registry.has_handlers(Hook.PRE_RENDER)
+
+
+def test_register_plugin_hooks_with_allowed_hooks_explicit_register() -> None:
+    """Explicit register() with allowed_hooks wraps registry in FilteredRegistry."""
+    registry = HookRegistry()
+    plugin = _ExplicitRegisterPlugin()
+    _register_plugin_hooks(
+        "explicit", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT}
+    )
+
+    assert registry.has_handlers(Hook.ON_GAME_INIT)
+
+
+# ---------------------------------------------------------------------------
+# activate_plugins with capabilities
+# ---------------------------------------------------------------------------
+
+
+def test_activate_plugins_enforce_hooks_disabled() -> None:
+    """When enforce_hooks=False, all hooks are allowed (no registry fetch)."""
+    registry = HookRegistry()
+    plugin = _AutoDiscoverPlugin()
+    ep = _make_entry_point("auto", type(plugin))
+
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch(
+            "reeln.plugins.loader._fetch_registry_capabilities"
+        ) as mock_fetch,
+    ):
+        result = activate_plugins(
+            PluginsConfig(enabled=["auto"], enforce_hooks=False)
+        )
+
+    # Registry should NOT have been fetched
+    mock_fetch.assert_not_called()
+    assert "auto" in result
+    reset_registry()
+
+
+def test_activate_plugins_enforce_hooks_default_true() -> None:
+    """enforce_hooks defaults to True — registry is fetched."""
+    ep = _make_entry_point("test", _NoConfigPlugin)
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch(
+            "reeln.plugins.loader._fetch_registry_capabilities", return_value={}
+        ) as mock_fetch,
+    ):
+        activate_plugins(PluginsConfig(enabled=["test"]))
+
+    mock_fetch.assert_called_once()
     reset_registry()
 
 

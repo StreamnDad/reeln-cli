@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- `ON_POST_GAME_FINISH` hook — fires after `ON_GAME_FINISH` with shared context, enabling cross-plugin data consumption at game finish (mirrors `ON_GAME_INIT` → `ON_GAME_READY` pattern)
+- `--log-level` CLI option and `REELN_LOG_LEVEL` env var to control log verbosity (default: WARNING)
+- `enforce_hooks` plugin config option — restricts plugins to hooks declared in the registry; set `false` for local plugin development
+- Registry capability enforcement — plugins can only register hooks declared in their `registry/plugins.json` entry
+
+### Changed
+- Default log level changed from INFO to WARNING (reduces noise during normal operation)
+
 ## [0.0.30] - 2026-03-11
 
 ### Added

@@ -28,3 +28,4 @@ reeln provides a hierarchical command structure organized by domain.
 | `--help` | Show help for the command |
 | `--version` | Show reeln version |
 | `--log-format json\|human` | Output format (default: human) |
+| `--log-level LEVEL` | Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING) |

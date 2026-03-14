@@ -11,7 +11,7 @@ from reeln.core.log import get_logger
 from reeln.models.config import PluginsConfig
 from reeln.models.plugin import PluginInfo
 from reeln.plugins.hooks import Hook
-from reeln.plugins.registry import HookRegistry, get_registry
+from reeln.plugins.registry import FilteredRegistry, HookRegistry, get_registry
 
 log: logging.Logger = get_logger(__name__)
 
@@ -137,12 +137,32 @@ def load_enabled_plugins(
     return loaded
 
 
+def _parse_allowed_hooks(capabilities: list[str]) -> set[Hook] | None:
+    """Extract the set of allowed hooks from a registry capabilities list.
+
+    Returns ``None`` when no hook capabilities are declared — which means the
+    plugin is not in the registry, and registration is unrestricted.
+    """
+    hook_values = {h.value for h in Hook}
+    allowed: set[Hook] = set()
+    for cap in capabilities:
+        if cap.startswith("hook:"):
+            hook_name = cap.removeprefix("hook:").lower()
+            if hook_name in hook_values:
+                allowed.add(Hook(hook_name))
+    return allowed if allowed else None
+
+
 def _register_plugin_hooks(
     name: str,
     plugin: object,
     registry: HookRegistry,
+    allowed_hooks: set[Hook] | None = None,
 ) -> None:
     """Register a plugin's hook handlers with the registry.
+
+    When *allowed_hooks* is set, only those hooks may be registered.
+    Attempts to register undeclared hooks are logged and skipped.
 
     If *plugin* has a callable ``register`` attribute, call it with the
     registry (explicit registration).  Otherwise, auto-discover ``on_<hook>``
@@ -151,10 +171,15 @@ def _register_plugin_hooks(
 
     Failures during ``register()`` are logged, never raised.
     """
+    # Wrap the registry when there's an allowlist
+    effective_registry: HookRegistry = registry
+    if allowed_hooks is not None:
+        effective_registry = FilteredRegistry(registry, allowed_hooks, name)
+
     register_fn = getattr(plugin, "register", None)
     if callable(register_fn):
         try:
-            register_fn(registry)
+            register_fn(effective_registry)
         except Exception:
             log.warning(
                 "Plugin %s register() failed, skipping",
@@ -169,11 +194,32 @@ def _register_plugin_hooks(
         if handler is None:
             handler = getattr(plugin, f"on_{hook.value}", None)
         if callable(handler):
-            registry.register(hook, handler)
+            effective_registry.register(hook, handler)
+
+
+def _fetch_registry_capabilities(registry_url: str) -> dict[str, list[str]]:
+    """Fetch the plugin registry and return a name → capabilities mapping.
+
+    Uses the cached registry when available. Returns an empty dict on
+    any error so that plugin activation is never blocked by a registry
+    fetch failure.
+    """
+    try:
+        from reeln.core.plugin_registry import fetch_registry
+
+        entries = fetch_registry(registry_url)
+        return {e.name: list(e.capabilities) for e in entries}
+    except Exception:
+        log.debug("Could not fetch registry for capability enforcement", exc_info=True)
+        return {}
 
 
 def activate_plugins(plugins_config: PluginsConfig) -> dict[str, object]:
     """Load enabled plugins and wire their hook handlers into the registry.
+
+    Fetches the plugin registry (from cache when available) to enforce
+    capability restrictions — plugins may only register hooks declared
+    in their registry entry.  Undeclared hooks are blocked with a warning.
 
     Clears the registry first for idempotency (prevents double-registration
     when called multiple times in the same process).
@@ -189,7 +235,14 @@ def activate_plugins(plugins_config: PluginsConfig) -> dict[str, object]:
         settings=plugins_config.settings,
     )
 
+    if plugins_config.enforce_hooks:
+        caps = _fetch_registry_capabilities(plugins_config.registry_url)
+    else:
+        caps = {}
+        log.debug("Hook enforcement disabled — plugins may register any hook")
+
     for name, plugin in loaded.items():
-        _register_plugin_hooks(name, plugin, registry)
+        allowed = _parse_allowed_hooks(caps.get(name, []))
+        _register_plugin_hooks(name, plugin, registry, allowed_hooks=allowed)
 
     return loaded

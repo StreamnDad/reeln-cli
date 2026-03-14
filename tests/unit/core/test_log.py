@@ -83,7 +83,13 @@ def test_setup_logging_replaces_handlers() -> None:
     assert isinstance(root.handlers[0].formatter, JsonFormatter)
 
 
-def test_setup_logging_level() -> None:
+def test_setup_logging_default_level_is_warning() -> None:
+    setup_logging(log_format="human")
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+
+
+def test_setup_logging_level_override() -> None:
     setup_logging(level=logging.DEBUG, log_format="human")
     root = logging.getLogger()
     assert root.level == logging.DEBUG

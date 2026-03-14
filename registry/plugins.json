@@ -4,8 +4,8 @@
     {
       "name": "streamn-scoreboard",
       "package": "reeln-plugin-streamn-scoreboard",
-      "description": "Bridges game init to OBS scoreboard text files — writes team names, clock, scores, shots, fouls, period, and sport",
-      "capabilities": ["hook:ON_GAME_INIT"],
+      "description": "Bridges game lifecycle to OBS scoreboard text files — writes initial state on init, copies event timestamps to chapters on finish",
+      "capabilities": ["hook:ON_GAME_INIT", "hook:ON_GAME_FINISH"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-streamn-scoreboard",
       "min_reeln_version": "0.0.19",
       "author": "StreamnDad",
