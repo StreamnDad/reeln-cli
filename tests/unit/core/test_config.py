@@ -709,10 +709,20 @@ def test_validate_config_iterations_valid() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_load_config_defaults(tmp_path: Path) -> None:
-    cfg = load_config(path=tmp_path / "nonexistent.json")
+def test_load_config_defaults_no_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When no explicit path/profile is set and the default file is missing, use defaults."""
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.delenv("REELN_PROFILE", raising=False)
+    with patch("reeln.core.config.default_config_path", return_value=Path("/nonexistent/config.json")):
+        cfg = load_config()
     assert cfg.sport == "generic"
     assert cfg.video.crf == 18
+
+
+def test_load_config_explicit_path_not_found(tmp_path: Path) -> None:
+    """Explicit path to a nonexistent file is a hard error."""
+    with pytest.raises(ConfigError, match="Config file not found"):
+        load_config(path=tmp_path / "nonexistent.json")
 
 
 def test_load_config_from_file(tmp_path: Path) -> None:
@@ -746,11 +756,14 @@ def test_load_config_not_a_dict(tmp_path: Path) -> None:
         load_config(path=cfg_file)
 
 
-def test_load_config_with_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_with_profile_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Named profile that doesn't exist is a hard error."""
     monkeypatch.delenv("REELN_CONFIG", raising=False)
-    with patch("reeln.core.config.default_config_path", return_value=tmp_path / "config.tourney.json"):
-        cfg = load_config(profile="tourney")
-    assert cfg.sport == "generic"  # defaults since file doesn't exist
+    with (
+        patch("reeln.core.config.default_config_path", return_value=tmp_path / "config.tourney.json"),
+        pytest.raises(ConfigError, match="Config file not found"),
+    ):
+        load_config(profile="tourney")
 
 
 def test_load_config_reeln_config_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -799,12 +812,11 @@ def test_load_config_explicit_profile_overrides_env(tmp_path: Path, monkeypatch:
     """Explicit profile argument takes priority over REELN_PROFILE env var."""
     monkeypatch.delenv("REELN_CONFIG", raising=False)
     monkeypatch.setenv("REELN_PROFILE", "ignored")
-    with patch(
-        "reeln.core.config.default_config_path",
-        return_value=tmp_path / "nonexistent.json",
-    ):
+    profile_file = tmp_path / "config.explicit.json"
+    profile_file.write_text(json.dumps({"config_version": 1, "sport": "rugby"}))
+    with patch("reeln.core.config.default_config_path", return_value=profile_file):
         cfg = load_config(profile="explicit")
-    assert cfg.sport == "generic"  # defaults since file doesn't exist
+    assert cfg.sport == "rugby"
 
 
 def test_load_config_reeln_config_env_overrides_profile_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -815,6 +827,24 @@ def test_load_config_reeln_config_env_overrides_profile_env(tmp_path: Path, monk
     monkeypatch.setenv("REELN_PROFILE", "ignored")
     cfg = load_config()
     assert cfg.sport == "baseball"
+
+
+def test_load_config_reeln_config_env_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REELN_CONFIG pointing to a nonexistent file is a hard error."""
+    monkeypatch.setenv("REELN_CONFIG", str(tmp_path / "missing.json"))
+    with pytest.raises(ConfigError, match="Config file not found"):
+        load_config()
+
+
+def test_load_config_reeln_profile_env_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """REELN_PROFILE pointing to a nonexistent profile is a hard error."""
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.setenv("REELN_PROFILE", "missing")
+    with (
+        patch("reeln.core.config.default_config_path", return_value=tmp_path / "config.missing.json"),
+        pytest.raises(ConfigError, match="Config file not found"),
+    ):
+        load_config()
 
 
 def test_load_config_no_env_vars_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,6 +13,7 @@ from reeln.core.config import (
     load_config,
     validate_config,
 )
+from reeln.core.errors import ConfigError
 
 app = typer.Typer(no_args_is_help=True, help="Configuration commands.")
 
@@ -23,7 +24,11 @@ def show(
     path: Path | None = typer.Option(None, "--path", help="Explicit config file path."),
 ) -> None:
     """Display current configuration."""
-    config = load_config(path=path, profile=profile)
+    try:
+        config = load_config(path=path, profile=profile)
+    except ConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     data = config_to_dict(config, full=True)
     typer.echo(json.dumps(data, indent=2))
 
@@ -34,7 +39,13 @@ def doctor(
     path: Path | None = typer.Option(None, "--path", help="Explicit config file path."),
 ) -> None:
     """Validate configuration, warn on issues."""
-    config = load_config(path=path, profile=profile)
+    try:
+        config = load_config(path=path, profile=profile)
+    except ConfigError as exc:
+        typer.echo(f"Config file: {path or default_config_path(profile)}")
+        typer.echo(f"  WARN: {exc}")
+        raise typer.Exit(code=1) from exc
+
     data = config_to_dict(config)
     issues = validate_config(data)
 

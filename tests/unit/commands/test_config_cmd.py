@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from reeln.cli import app
@@ -20,12 +21,10 @@ def test_config_help_lists_commands() -> None:
     assert "doctor" in result.output
 
 
-def test_config_show_defaults(tmp_path: Path) -> None:
+def test_config_show_missing_file_errors(tmp_path: Path) -> None:
+    """Explicit --path to a nonexistent file is a hard error."""
     result = runner.invoke(app, ["config", "show", "--path", str(tmp_path / "nonexistent.json")])
-    assert result.exit_code == 0
-    data = json.loads(result.output)
-    assert data["config_version"] == 1
-    assert data["sport"] == "generic"
+    assert result.exit_code == 1
 
 
 def test_config_show_from_file(tmp_path: Path) -> None:
@@ -46,8 +45,24 @@ def test_config_doctor_valid(tmp_path: Path) -> None:
     assert str(cfg_file) in result.output
 
 
-def test_config_doctor_defaults_no_file(tmp_path: Path) -> None:
+def test_config_doctor_missing_file(tmp_path: Path) -> None:
+    """Doctor with --path to a nonexistent file reports a warning."""
     result = runner.invoke(app, ["config", "doctor", "--path", str(tmp_path / "missing.json")])
+    assert result.exit_code == 1
+    assert "WARN" in result.output
+    assert "not found" in result.output
+
+
+def test_config_doctor_no_default_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor without explicit path and no default config uses defaults, shows not found."""
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.delenv("REELN_PROFILE", raising=False)
+    fake_path = tmp_path / "config.json"
+    with (
+        patch("reeln.core.config.default_config_path", return_value=fake_path),
+        patch("reeln.commands.config_cmd.default_config_path", return_value=fake_path),
+    ):
+        result = runner.invoke(app, ["config", "doctor"])
     assert result.exit_code == 0
     assert "not found" in result.output
     assert "OK" in result.output

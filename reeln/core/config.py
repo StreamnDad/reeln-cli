@@ -399,6 +399,11 @@ def load_config(
     """
     base = config_to_dict(default_config())
 
+    # Determine whether the user explicitly requested a specific config
+    explicit = path is not None or profile is not None or bool(
+        os.environ.get("REELN_CONFIG") or os.environ.get("REELN_PROFILE")
+    )
+
     file_path = resolve_config_path(path, profile)
     if file_path.is_file():
         try:
@@ -410,6 +415,8 @@ def load_config(
             raise ConfigError(f"Config file must be a JSON object, got {type(raw).__name__}")
 
         merged = deep_merge(base, raw)
+    elif explicit:
+        raise ConfigError(f"Config file not found: {file_path}")
     else:
         merged = base
         log.debug("No config file at %s, using defaults", file_path)

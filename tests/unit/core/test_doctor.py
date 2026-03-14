@@ -16,7 +16,7 @@ from reeln.core.doctor import (
     format_results,
     run_doctor,
 )
-from reeln.core.errors import FFmpegError
+from reeln.core.errors import ConfigError, FFmpegError
 from reeln.models.config import AppConfig, PathConfig
 from reeln.models.doctor import CheckResult, CheckStatus
 
@@ -140,6 +140,18 @@ def test_check_config_valid() -> None:
     assert "valid" in results[0].message
 
 
+def test_check_config_file_not_found() -> None:
+    with patch(
+        "reeln.core.doctor.load_config",
+        side_effect=ConfigError("Config file not found: /missing.json"),
+    ):
+        results = check_config()
+
+    assert len(results) == 1
+    assert results[0].status == CheckStatus.WARN
+    assert "not found" in results[0].message
+
+
 def test_check_config_with_issues() -> None:
     with (
         patch("reeln.core.doctor.load_config", return_value=AppConfig()),
@@ -157,6 +169,18 @@ def test_check_config_with_issues() -> None:
 # ---------------------------------------------------------------------------
 # check_directories
 # ---------------------------------------------------------------------------
+
+
+def test_check_directories_config_not_found() -> None:
+    with patch(
+        "reeln.core.doctor.load_config",
+        side_effect=ConfigError("Config file not found: /missing.json"),
+    ):
+        results = check_directories()
+
+    assert len(results) == 1
+    assert results[0].status == CheckStatus.WARN
+    assert "not found" in results[0].message
 
 
 def test_check_directories_exists_writable(tmp_path: Path) -> None:

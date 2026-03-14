@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `enforce_hooks` plugin config option — restricts plugins to hooks declared in the registry; set `false` for local plugin development
 - Registry capability enforcement — plugins can only register hooks declared in their `registry/plugins.json` entry
 
+### Fixed
+- Explicit `--profile` or `--path` to a nonexistent config file now fails immediately instead of silently using defaults
+
 ### Changed
 - Default log level changed from INFO to WARNING (reduces noise during normal operation)
 

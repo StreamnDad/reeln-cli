@@ -11,7 +11,7 @@ from reeln.core.config import (
     load_config,
     validate_config,
 )
-from reeln.core.errors import FFmpegError
+from reeln.core.errors import ConfigError, FFmpegError
 from reeln.core.ffmpeg import (
     check_version,
     discover_ffmpeg,
@@ -121,7 +121,16 @@ def check_config(
     profile: str | None = None,
 ) -> list[CheckResult]:
     """Check config validity."""
-    config = load_config(path=config_path, profile=profile)
+    try:
+        config = load_config(path=config_path, profile=profile)
+    except ConfigError as exc:
+        return [
+            CheckResult(
+                name="config",
+                status=CheckStatus.WARN,
+                message=str(exc),
+            )
+        ]
     data = config_to_dict(config)
     issues = validate_config(data)
 
@@ -149,7 +158,16 @@ def check_directories(
     profile: str | None = None,
 ) -> list[CheckResult]:
     """Check configured directory paths."""
-    config = load_config(path=config_path, profile=profile)
+    try:
+        config = load_config(path=config_path, profile=profile)
+    except ConfigError as exc:
+        return [
+            CheckResult(
+                name="directories",
+                status=CheckStatus.WARN,
+                message=str(exc),
+            )
+        ]
     results: list[CheckResult] = []
 
     dirs_to_check: list[tuple[str, Path | None]] = [
