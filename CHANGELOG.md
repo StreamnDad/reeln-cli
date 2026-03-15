@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `--profile` now resolves relative to the active config directory (parent of `REELN_CONFIG`) instead of the platform default, so profiles stored alongside a custom config file are found correctly
+- `--profile` and `--path` CLI arguments now take strict priority over `REELN_CONFIG` and `REELN_PROFILE` environment variables
+
 ## [0.0.31] - 2026-03-13
 
 ### Added

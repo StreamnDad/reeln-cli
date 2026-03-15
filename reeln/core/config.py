@@ -68,6 +68,19 @@ def data_dir() -> Path:
     return Path.home() / ".local" / "share" / _APP_NAME
 
 
+def _config_base_dir() -> Path:
+    """Return the directory where config files live.
+
+    Uses the parent directory of ``REELN_CONFIG`` when set, otherwise
+    falls back to ``config_dir()``.  This ensures ``--profile`` resolves
+    relative to the active config location.
+    """
+    env_config = os.environ.get("REELN_CONFIG")
+    if env_config:
+        return Path(env_config).expanduser().parent
+    return config_dir()
+
+
 def default_config_path(profile: str | None = None) -> Path:
     """Return the path to the config file, optionally for a named profile."""
     if profile:
@@ -375,7 +388,9 @@ def resolve_config_path(
     if path is not None:
         return path
     if profile is not None:
-        return default_config_path(profile)
+        # Resolve profile relative to the active config directory
+        base_dir = _config_base_dir()
+        return base_dir / f"config.{profile}.json"
 
     # Fall through to env vars
     env_config = os.environ.get("REELN_CONFIG")
@@ -383,7 +398,8 @@ def resolve_config_path(
         return Path(env_config).expanduser()
     env_profile = os.environ.get("REELN_PROFILE")
     if env_profile:
-        return default_config_path(env_profile)
+        base_dir = _config_base_dir()
+        return base_dir / f"config.{env_profile}.json"
 
     return default_config_path()
 

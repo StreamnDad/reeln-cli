@@ -334,7 +334,7 @@ class TestCLIErrorScenarios:
                 ],
             )
         assert result.exit_code == 1
-        assert "No video files" in result.output
+        assert "No files matching" in result.output
 
     def test_highlights_with_no_segments(self, tmp_path: Path) -> None:
         """No segment highlight files → "No segment highlight files" error."""

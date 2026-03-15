@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from reeln.core.config import (
+    _config_base_dir,
     apply_env_overrides,
     config_dir,
     config_to_dict,
@@ -104,6 +105,24 @@ def test_default_config_path_with_profile() -> None:
     with patch("reeln.core.config.config_dir", return_value=Path("/cfg/reeln")):
         result = default_config_path("tournament")
     assert result == Path("/cfg/reeln/config.tournament.json")
+
+
+# ---------------------------------------------------------------------------
+# _config_base_dir
+# ---------------------------------------------------------------------------
+
+
+def test_config_base_dir_with_reeln_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When REELN_CONFIG is set, _config_base_dir returns its parent directory."""
+    monkeypatch.setenv("REELN_CONFIG", "/custom/path/config.json")
+    assert _config_base_dir() == Path("/custom/path")
+
+
+def test_config_base_dir_without_reeln_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When REELN_CONFIG is not set, _config_base_dir falls back to config_dir()."""
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    with patch("reeln.core.config.config_dir", return_value=Path("/default/cfg")):
+        assert _config_base_dir() == Path("/default/cfg")
 
 
 # ---------------------------------------------------------------------------
@@ -803,7 +822,7 @@ def test_load_config_reeln_profile_env(tmp_path: Path, monkeypatch: pytest.Monke
     profile_file = tmp_path / "config.tourney.json"
     profile_file.write_text(json.dumps({"config_version": 1, "sport": "lacrosse"}))
     monkeypatch.setenv("REELN_PROFILE", "tourney")
-    with patch("reeln.core.config.default_config_path", return_value=profile_file):
+    with patch("reeln.core.config._config_base_dir", return_value=tmp_path):
         cfg = load_config()
     assert cfg.sport == "lacrosse"
 
@@ -814,7 +833,7 @@ def test_load_config_explicit_profile_overrides_env(tmp_path: Path, monkeypatch:
     monkeypatch.setenv("REELN_PROFILE", "ignored")
     profile_file = tmp_path / "config.explicit.json"
     profile_file.write_text(json.dumps({"config_version": 1, "sport": "rugby"}))
-    with patch("reeln.core.config.default_config_path", return_value=profile_file):
+    with patch("reeln.core.config._config_base_dir", return_value=tmp_path):
         cfg = load_config(profile="explicit")
     assert cfg.sport == "rugby"
 
