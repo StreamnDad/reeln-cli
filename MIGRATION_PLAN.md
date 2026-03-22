@@ -22,14 +22,14 @@
 │  │ HW accel      │  │ File locking │  │ Validation │ │
 │  │ Codec query   │  │ Event log    │  │            │ │
 │  └──────────────┘  └──────────────┘  └────────────┘ │
-│  ┌──────────────┐  ┌──────────────┐                  │
-│  │ reeln-config  │  │ reeln-plugin │                  │
-│  │               │  │              │                  │
-│  │ XDG paths     │  │ Hook system  │                  │
-│  │ Layered merge │  │ Capabilities │                  │
-│  │ Env overrides │  │ Registry     │                  │
-│  │ Validation    │  │ Lifecycle    │                  │
-│  └──────────────┘  └──────────────┘                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
+│  │ reeln-overlay │  │ reeln-config │  │reeln-plugin│ │
+│  │               │  │              │  │            │ │
+│  │ Template eng. │  │ XDG paths    │  │ Hook system│ │
+│  │ 2D rasterizer │  │ Layered merge│  │ Capabilites│ │
+│  │ Text shaping  │  │ Env overrides│  │ Registry   │ │
+│  │ Image composit│  │ Validation   │  │ Lifecycle  │ │
+│  └──────────────┘  └──────────────┘  └────────────┘ │
 ├──────────────────────────────────────────────────────┤
 │                   Binding Layer                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
@@ -51,16 +51,28 @@ reeln-core/
 ├── README.md
 │
 ├── crates/
-│   ├── reeln-media/              # Phase 1 — Media operations
+│   ├── reeln-media/              # Phase 1a — Media operations
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── probe.rs          # Duration, FPS, resolution via libav*
 │   │       ├── concat.rs         # Stream-copy concat + re-encode concat
 │   │       ├── render.rs         # General render pipeline (scale, codec, CRF)
-│   │       ├── filter.rs         # Filter chain builder (overlays, crops, shorts)
+│   │       ├── filter.rs         # Filter chain builder (crops, shorts, overlay compositing)
 │   │       ├── codec.rs          # Codec/hwaccel discovery
 │   │       └── error.rs          # MediaError types
+│   │
+│   ├── reeln-overlay/            # Phase 1b — Overlay template engine (replaces ASS)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── template.rs       # Template model, JSON/TOML loading, registry
+│   │       ├── elements.rs       # Primitives: Rect, Text, Image, Gradient
+│   │       ├── layout.rs         # Percentage-based positioning, resolution scaling
+│   │       ├── text.rs           # Font loading, text shaping, measurement, auto-shrink
+│   │       ├── render.rs         # Rasterize template → RGBA frame(s) via tiny-skia
+│   │       ├── animation.rs      # Timing, fade in/out, easing curves
+│   │       └── error.rs          # OverlayError types
 │   │
 │   ├── reeln-sport/              # Phase 2 — Sport & segment logic
 │   │   ├── Cargo.toml
@@ -143,7 +155,7 @@ reeln-core/
 
 ## 3. Phased Migration
 
-### Phase 1: `reeln-media` — FFmpeg/libav* operations
+### Phase 1a: `reeln-media` — FFmpeg/libav* operations
 
 **What moves from Python:**
 | Python source | Rust target | Notes |
@@ -193,6 +205,223 @@ pub struct ConcatOptions {
 ```
 
 **Deliverable:** `cargo test` passes for probe, concat, and render operations against sample media files. Python CLI continues working unchanged (Rust not wired in yet).
+
+---
+
+### Phase 1b: `reeln-overlay` — Template rendering engine (replaces ASS)
+
+**Why:** The current ASS subtitle overlay system (`goal_overlay.ass`) requires `ffmpeg-full`
+built with `--enable-libass --enable-libfontconfig --enable-libfreetype --enable-libfribidi`.
+It is also limited to hard-coded 1920x1080 pixel coordinates, cannot embed images (team logos),
+and has no support for gradients, rounded corners, or animations beyond simple timing.
+
+The `reeln-overlay` crate replaces ASS with a **native Rust 2D rendering engine** that
+rasterizes overlay templates to RGBA image frames. These frames are composited onto video
+using libav*'s built-in `overlay` filter — available in **every** FFmpeg/libav* build
+with zero additional dependencies.
+
+**What moves from Python:**
+| Python source | Rust target | Notes |
+|---|---|---|
+| `core/overlay.py:resolve_builtin_template()` | `reeln-overlay/template.rs` | Template registry with builtin + user + plugin templates |
+| `core/overlay.py:overlay_font_size()` | `reeln-overlay/text.rs` | Replaced by `auto_shrink` in text element spec |
+| `core/overlay.py:build_overlay_context()` | `reeln-overlay/render.rs` | Context variables resolved during rasterization |
+| `core/overlay.py:_parse_assists()` | `reeln-overlay/template.rs` | Template conditionals (`visible` field) handle this |
+| `core/overlay.py:_parse_color()` | `reeln-overlay/elements.rs` | Native `Color` type with hex/rgb/named parsing |
+| `core/templates.py:render_template()` | `reeln-overlay/template.rs` | `{{var}}` substitution + conditionals |
+| `core/templates.py:render_template_file()` | `reeln-overlay/template.rs` | Loads JSON/TOML templates (replaces .ass files) |
+| `core/templates.py:build_base_context()` | `reeln-overlay/template.rs` | Context builder from game info + events |
+| `core/templates.py:rgb_to_ass()` | Removed | No longer needed — colors are native RGBA |
+| `core/templates.py:format_ass_time()` | Removed | Timing is in the template's `timing` block |
+| `core/templates.py:TemplateProvider` | `reeln-overlay/template.rs` | `trait TemplateProvider` (plugins contribute variables) |
+| `core/shorts.py:build_subtitle_filter()` | `reeln-media/filter.rs` | Replaced by `overlay` filter compositing PNG frames |
+| `data/templates/goal_overlay.ass` | `data/templates/goal_overlay.json` | Migrated to JSON template format (see below) |
+
+**Key Rust dependencies:**
+- `tiny-skia` — CPU 2D rasterizer (rects, rounded rects, paths, gradients, image compositing)
+- `cosmic-text` — Font discovery, loading, shaping, measurement, line wrapping (Unicode, ligatures, RTL)
+- `image` — PNG encode/decode for rendered overlay frames
+
+**Element primitives:**
+```rust
+// reeln-overlay/src/elements.rs
+
+/// A visual element within an overlay template.
+pub enum Element {
+    Rect {
+        bounds: Bounds,                 // x, y, w, h — percentage (0.0-1.0) or pixels
+        fill: Color,
+        corner_radius: f32,
+        border: Option<Border>,
+        opacity: f32,
+    },
+    Text {
+        content: String,                // supports {{var}} placeholders
+        position: Position,
+        font: FontSpec,                 // family, size, weight, auto_shrink min size
+        color: Color,
+        outline: Option<OutlineSpec>,
+        alignment: Alignment,
+        max_width: Option<f32>,
+        visible: Option<String>,        // conditional: "{{has_assists}}"
+    },
+    Image {
+        source: ImageSource,            // file path, embedded bytes, or {{var}} path
+        position: Position,
+        size: Size,
+        fit: ImageFit,                  // contain, cover, fill
+        opacity: f32,
+    },
+    Gradient {
+        bounds: Bounds,
+        stops: Vec<GradientStop>,       // color + position pairs
+        direction: GradientDirection,   // horizontal, vertical, angle(f32)
+        corner_radius: f32,
+    },
+}
+
+pub enum ImageSource {
+    File(PathBuf),                      // e.g. team logo on disk
+    Embedded(Vec<u8>),                  // logo stored in game state / team profile
+    Variable(String),                   // "{{team_logo}}" — resolved at render time
+}
+```
+
+**Template format (JSON, replaces ASS):**
+```json
+{
+  "name": "goal-overlay",
+  "version": 2,
+  "canvas": { "width": 1920, "height": 1080 },
+  "layers": [
+    {
+      "type": "rect",
+      "x": "0%", "y": "76%", "w": "100%", "h": "13%",
+      "fill": "{{primary_color}}",
+      "opacity": 0.9
+    },
+    {
+      "type": "rect",
+      "x": "0.15%", "y": "76.3%", "w": "99.7%", "h": "12.5%",
+      "fill": "{{primary_color}}",
+      "opacity": 0.6
+    },
+    {
+      "type": "image",
+      "source": "{{team_logo}}",
+      "x": "1%", "y": "77%", "w": "4%", "h": "auto",
+      "fit": "contain"
+    },
+    {
+      "type": "text",
+      "content": "{{team_name}}  -  {{sport}}",
+      "x": "6%", "y": "77.5%",
+      "font": { "family": "Inter", "size": 22, "weight": "normal" },
+      "color": "{{text_color}}"
+    },
+    {
+      "type": "text",
+      "content": "{{scorer}}",
+      "x": "6%", "y": "80%",
+      "font": { "family": "Inter", "size": 46, "weight": "bold", "auto_shrink": 32 },
+      "color": "#FFFFFF"
+    },
+    {
+      "type": "text",
+      "content": "{{assist_1}}",
+      "x": "7.5%", "y": "84%",
+      "font": { "family": "Inter", "size": 24, "auto_shrink": 18 },
+      "color": "#FFFFFF",
+      "visible": "{{has_assists}}"
+    },
+    {
+      "type": "text",
+      "content": "{{assist_2}}",
+      "x": "7.5%", "y": "86%",
+      "font": { "family": "Inter", "size": 24, "auto_shrink": 18 },
+      "color": "#FFFFFF",
+      "visible": "{{has_assists_2}}"
+    }
+  ],
+  "timing": {
+    "fade_in": 0.3,
+    "hold": 10.0,
+    "fade_out": 0.5
+  }
+}
+```
+
+**Key improvements over ASS:**
+| Capability | ASS (current) | reeln-overlay (new) |
+|---|---|---|
+| Positioning | Absolute pixels (1920x1080 only) | Percentage-based (any resolution) |
+| Team logos | Not possible | `Image` element with `contain`/`cover` fit |
+| Rounded corners | Not possible | `corner_radius` on Rect/Gradient |
+| Gradients | Not possible | Linear/radial with arbitrary stops |
+| Auto-shrink text | Manual `overlay_font_size()` hack | Built-in `auto_shrink` min size on font spec |
+| Conditional visibility | Zero-duration timing hack | `visible: "{{has_assists}}"` field |
+| Animations | Start/end time only | Fade in/out with easing curves |
+| Colors | BGR `&HAABBGGRR` format | Standard hex `#RRGGBB` / `rgba()` / named |
+| Template format | ASS subtitle markup + `\p1` drawing hacks | Clean JSON/TOML with typed elements |
+| FFmpeg requirement | `ffmpeg-full` (libass, libfontconfig, libfreetype, libfribidi) | **Standard ffmpeg** (`overlay` filter is always built in) |
+| User-editable | Requires ASS knowledge | JSON — editable by anyone |
+| Live preview | Not possible | Rasterize to PNG — previewable in Tauri app |
+| Plugin templates | `TemplateProvider` returns string vars | `TemplateProvider` returns structured elements |
+
+**Rendering pipeline — how it replaces ASS:**
+```
+BEFORE (ASS — requires ffmpeg-full):
+  Template vars → substitute into .ass file → ffmpeg -vf "ass='overlay.ass'" → output
+  Dependencies: libass, libfontconfig, libfreetype, libfribidi, harfbuzz
+
+AFTER (reeln-overlay — standard ffmpeg):
+  Template JSON + context vars
+       │
+       ▼
+  reeln-overlay rasterizes → RGBA PNG frame(s)
+       │                      (tiny-skia + cosmic-text)
+       ▼
+  reeln-media composites via libav* overlay filter → output
+       │                      (built into every ffmpeg)
+       ▼
+  Final video with overlay burned in
+```
+
+**Two compositing strategies (start with A, evolve to B):**
+
+*Strategy A — PNG overlay (Phase 1b):*
+```rust
+// Render template to PNG, composite via overlay filter
+pub fn apply_overlay(
+    video: &Path,
+    template: &Template,
+    context: &TemplateContext,
+    output: &Path,
+    timing: &Timing,
+) -> Result<(), OverlayError> {
+    let frame = render_template_to_png(template, context)?;
+    // Uses libav* overlay filter: [1:v]fade=in:...[ov];[0:v][ov]overlay=0:0
+    reeln_media::composite_overlay(video, &frame, output, timing)?;
+    Ok(())
+}
+```
+
+*Strategy B — Direct frame injection (future optimization):*
+```rust
+// Decode frame → blend overlay RGBA onto decoded frame → encode
+// No temp files, fully in-process via libav* APIs
+pub fn render_with_overlay(
+    input: &Path,
+    template: &Template,
+    context: &TemplateContext,
+    output: &Path,
+) -> Result<(), OverlayError> {
+    // Per-frame: decode → composite RGBA overlay → encode
+    // Supports per-frame animation (slide in, fade, etc.)
+}
+```
+
+**Deliverable:** A goal overlay template renders to PNG with team name, scorer, assists, team colors, and team logo. The PNG composites onto a test video using the `overlay` filter. Visual output matches the current ASS overlay.
 
 ---
 
@@ -429,6 +658,7 @@ fn get_game_state(game_dir: &str) -> Result<GameState, String> {
 | Crate | Rust Dependencies |
 |---|---|
 | `reeln-media` | `ffmpeg-next`, `thiserror`, `log` |
+| `reeln-overlay` | `reeln-media`, `tiny-skia`, `cosmic-text`, `image`, `serde`, `serde_json`, `thiserror` |
 | `reeln-sport` | `serde`, `thiserror` |
 | `reeln-state` | `reeln-sport`, `serde`, `serde_json`, `chrono`, `uuid`, `tempfile`, `thiserror` |
 | `reeln-config` | `reeln-state`, `serde`, `serde_json`, `dirs`, `thiserror` |
@@ -451,7 +681,11 @@ The Python CLI remains the user-facing layer. These stay:
 | `core/log.py` | Python logging formatters |
 | `core/doctor.py` | Health checks (adapted to verify native module) |
 
-Everything in `core/` that does real work (ffmpeg, highlights, config, segment, renderer) gets **replaced by thin wrappers** around `reeln_native` calls.
+Everything in `core/` that does real work (ffmpeg, highlights, config, segment, renderer, overlay, templates, shorts) gets **replaced by thin wrappers** around `reeln_native` calls.
+
+The ASS subtitle files (`data/templates/*.ass`) are replaced by JSON overlay templates
+consumed by `reeln-overlay`. The `core/overlay.py`, `core/templates.py`, and ASS-related
+code in `core/shorts.py` are fully superseded.
 
 ---
 
@@ -500,15 +734,17 @@ jobs:
 
 | Phase | Crate | Depends On | What It Unlocks |
 |---|---|---|---|
-| **1** | `reeln-media` | — | Eliminates FFmpeg binary dependency |
+| **1a** | `reeln-media` | — | Eliminates FFmpeg binary dependency |
+| **1b** | `reeln-overlay` | `reeln-media` | Eliminates ffmpeg-full/libass dependency; team logos, gradients, responsive overlays |
 | **2** | `reeln-sport` + `reeln-state` | — | Shared domain logic |
 | **3** | `reeln-config` | `reeln-state` | Shared configuration |
 | **4** | `reeln-plugin` | `reeln-state` | Rust-native plugins |
 | **5** | `reeln-python` | Phases 1-4 | Python CLI uses Rust backend |
 | **6** | `reeln-ffi` | Phases 1-4 | OBS plugin can link reeln-core |
-| **7** | `reeln-tauri` | Phases 1-4 | Desktop app |
+| **7** | `reeln-tauri` | Phases 1-4 | Desktop app (with live overlay preview) |
 
-Phases 1-4 are sequential. Phases 5, 6, and 7 can run in parallel once 1-4 are done.
+Phases 1a → 1b are sequential (overlay depends on media). Phase 2 can start in parallel
+with Phase 1b. Phases 5, 6, and 7 can run in parallel once 1-4 are done.
 
 ---
 
@@ -525,6 +761,7 @@ cat > Cargo.toml << 'EOF'
 resolver = "2"
 members = [
     "crates/reeln-media",
+    "crates/reeln-overlay",
     "crates/reeln-sport",
     "crates/reeln-state",
     "crates/reeln-config",
@@ -539,6 +776,9 @@ serde_json = "1"
 thiserror = "2"
 log = "0.4"
 ffmpeg-next = "7"
+tiny-skia = "0.11"
+cosmic-text = "0.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3"
@@ -547,7 +787,11 @@ pyo3 = { version = "0.23", features = ["extension-module"] }
 libloading = "0.8"
 EOF
 
-# Start with Phase 1
+# Start with Phase 1a
 mkdir -p crates/reeln-media/src
 # ... begin porting ffmpeg.py → probe.rs, concat.rs, etc.
+
+# Then Phase 1b
+mkdir -p crates/reeln-overlay/src
+# ... port overlay.py + templates.py → template.rs, elements.rs, render.rs, etc.
 ```
