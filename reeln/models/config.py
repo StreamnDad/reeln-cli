@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from reeln.models.branding import BrandingConfig
 from reeln.models.plugin import OrchestrationConfig
 from reeln.models.profile import IterationConfig, RenderProfile
 
@@ -53,5 +54,6 @@ class AppConfig:
     paths: PathConfig = field(default_factory=PathConfig)
     render_profiles: dict[str, RenderProfile] = field(default_factory=dict)
     iterations: IterationConfig = field(default_factory=IterationConfig)
+    branding: BrandingConfig = field(default_factory=BrandingConfig)
     orchestration: OrchestrationConfig = field(default_factory=OrchestrationConfig)
     plugins: PluginsConfig = field(default_factory=PluginsConfig)

@@ -13,6 +13,7 @@ from reeln.core.errors import PromptAborted, ReelnError
 from reeln.core.ffmpeg import discover_ffmpeg
 from reeln.core.highlights import init_game, merge_game_highlights, process_segment
 from reeln.core.prompts import collect_game_info_interactive
+from reeln.core.teams import slugify
 from reeln.models.game import GameInfo
 from reeln.plugins.loader import activate_plugins
 
@@ -139,6 +140,7 @@ def init(
     period_length: int = typer.Option(0, "--period-length", help="Period/segment length in minutes (0 = not set)."),
     description: str = typer.Option("", "--description", "-d", help="Broadcast description."),
     thumbnail: str = typer.Option("", "--thumbnail", help="Thumbnail image file path."),
+    tournament: str = typer.Option("", "--tournament", help="Tournament name (optional context for plugins)."),
     output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Base output directory."),
     profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
     config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
@@ -168,9 +170,11 @@ def init(
                 game_date=game_date,
                 venue=None if venue == "" else venue,
                 game_time=None if game_time == "" else game_time,
+                level=level,
                 period_length=None if period_length == 0 else period_length,
                 description=None if description == "" else description,
                 thumbnail=None if thumbnail == "" else thumbnail,
+                tournament=None if tournament == "" else tournament,
             )
         except PromptAborted:
             raise typer.Abort() from None
@@ -190,6 +194,10 @@ def init(
             period_length=info["period_length"],
             description=info["description"],
             thumbnail=info["thumbnail"],
+            tournament=info["tournament"],
+            level=level or "",
+            home_slug=slugify(info["home"]) if level else "",
+            away_slug=slugify(info["away"]) if level else "",
         )
     else:
         # Non-interactive mode — use CLI args directly
@@ -197,14 +205,21 @@ def init(
         home_team = home
         away_team = away
 
+        resolved_level = ""
+        home_slug = ""
+        away_slug = ""
+
         if level is not None:
             try:
-                from reeln.core.teams import load_team_profile, slugify
+                from reeln.core.teams import load_team_profile
 
-                home_profile = load_team_profile(level, slugify(home))
-                away_profile = load_team_profile(level, slugify(away))
+                home_slug = slugify(home)
+                away_slug = slugify(away)
+                home_profile = load_team_profile(level, home_slug)
+                away_profile = load_team_profile(level, away_slug)
                 home_team = home_profile.team_name
                 away_team = away_profile.team_name
+                resolved_level = level
             except ReelnError as exc:
                 typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
@@ -219,12 +234,14 @@ def init(
             period_length=period_length,
             description=description,
             thumbnail=thumbnail,
+            tournament=tournament,
+            level=resolved_level,
+            home_slug=home_slug,
+            away_slug=away_slug,
         )
 
     try:
-        _, messages = init_game(
-            base, game_info, dry_run=dry_run, home_profile=home_profile, away_profile=away_profile
-        )
+        _, messages = init_game(base, game_info, dry_run=dry_run, home_profile=home_profile, away_profile=away_profile)
     except ReelnError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc

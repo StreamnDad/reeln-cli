@@ -7,6 +7,18 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class SpeedSegment:
+    """One segment in a variable-speed timeline.
+
+    ``until`` is the source-time boundary in seconds (exclusive).
+    The last segment must have ``until=None`` (runs to end of clip).
+    """
+
+    speed: float
+    until: float | None = None
+
+
+@dataclass(frozen=True)
 class RenderProfile:
     """Named set of rendering parameter overrides.
 
@@ -21,8 +33,11 @@ class RenderProfile:
     anchor_x: float | None = None
     anchor_y: float | None = None
     pad_color: str | None = None
+    scale: float | None = None
+    smart: bool | None = None
     # Filters (applied to both short-form and full-frame)
     speed: float | None = None
+    speed_segments: tuple[SpeedSegment, ...] | None = None
     lut: str | None = None
     subtitle_template: str | None = None
     # Encoding overrides
@@ -61,6 +76,8 @@ _PROFILE_FIELDS: tuple[str, ...] = (
     "anchor_x",
     "anchor_y",
     "pad_color",
+    "scale",
+    "smart",
     "speed",
     "lut",
     "subtitle_template",
@@ -71,6 +88,8 @@ _PROFILE_FIELDS: tuple[str, ...] = (
     "audio_bitrate",
 )
 
+# speed_segments is handled separately (not a simple scalar field)
+
 
 def render_profile_to_dict(profile: RenderProfile) -> dict[str, Any]:
     """Serialize a ``RenderProfile``, omitting ``None`` fields."""
@@ -79,6 +98,11 @@ def render_profile_to_dict(profile: RenderProfile) -> dict[str, Any]:
         value = getattr(profile, field_name)
         if value is not None:
             result[field_name] = value
+    if profile.speed_segments is not None:
+        result["speed_segments"] = [
+            {"speed": s.speed, **({"until": s.until} if s.until is not None else {})}
+            for s in profile.speed_segments
+        ]
     return result
 
 
@@ -92,7 +116,10 @@ def dict_to_render_profile(name: str, data: dict[str, Any]) -> RenderProfile:
         anchor_x=_opt_float(data, "anchor_x"),
         anchor_y=_opt_float(data, "anchor_y"),
         pad_color=_opt_str(data, "pad_color"),
+        scale=_opt_float(data, "scale"),
+        smart=_opt_bool(data, "smart"),
         speed=_opt_float(data, "speed"),
+        speed_segments=_opt_speed_segments(data, "speed_segments"),
         lut=_opt_str(data, "lut"),
         subtitle_template=_opt_str(data, "subtitle_template"),
         codec=_opt_str(data, "codec"),
@@ -132,6 +159,23 @@ def _opt_float(data: dict[str, Any], key: str) -> float | None:
     return float(v) if v is not None else None
 
 
+def _opt_bool(data: dict[str, Any], key: str) -> bool | None:
+    v = data.get(key)
+    return bool(v) if v is not None else None
+
+
 def _opt_str(data: dict[str, Any], key: str) -> str | None:
     v = data.get(key)
     return str(v) if v is not None else None
+
+
+def _opt_speed_segments(
+    data: dict[str, Any], key: str
+) -> tuple[SpeedSegment, ...] | None:
+    v = data.get(key)
+    if v is None or not isinstance(v, list):
+        return None
+    return tuple(
+        SpeedSegment(speed=float(s["speed"]), until=s.get("until"))
+        for s in v
+    )

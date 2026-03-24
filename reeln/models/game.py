@@ -20,6 +20,10 @@ class GameInfo:
     period_length: int = 0
     description: str = ""
     thumbnail: str = ""
+    level: str = ""
+    home_slug: str = ""
+    away_slug: str = ""
+    tournament: str = ""
 
 
 @dataclass
@@ -61,6 +65,8 @@ class GameState:
     renders: list[RenderEntry] = field(default_factory=list)
     events: list[GameEvent] = field(default_factory=list)
     livestreams: dict[str, str] = field(default_factory=dict)
+    segment_outputs: list[str] = field(default_factory=list)
+    highlights_output: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +87,10 @@ def game_info_to_dict(info: GameInfo) -> dict[str, Any]:
         "period_length": info.period_length,
         "description": info.description,
         "thumbnail": info.thumbnail,
+        "level": info.level,
+        "home_slug": info.home_slug,
+        "away_slug": info.away_slug,
+        "tournament": info.tournament,
     }
 
 
@@ -97,6 +107,10 @@ def dict_to_game_info(data: dict[str, Any]) -> GameInfo:
         period_length=int(data.get("period_length", 0)),
         description=str(data.get("description", "")),
         thumbnail=str(data.get("thumbnail", "")),
+        level=str(data.get("level", "")),
+        home_slug=str(data.get("home_slug", "")),
+        away_slug=str(data.get("away_slug", "")),
+        tournament=str(data.get("tournament", "")),
     )
 
 
@@ -164,6 +178,8 @@ def game_state_to_dict(state: GameState) -> dict[str, Any]:
         "renders": [render_entry_to_dict(r) for r in state.renders],
         "events": [game_event_to_dict(e) for e in state.events],
         "livestreams": dict(state.livestreams),
+        "segment_outputs": list(state.segment_outputs),
+        "highlights_output": state.highlights_output,
     }
 
 
@@ -181,4 +197,6 @@ def dict_to_game_state(data: dict[str, Any]) -> GameState:
         renders=[dict_to_render_entry(r) for r in renders_raw],
         events=[dict_to_game_event(e) for e in events_raw],
         livestreams=dict(data.get("livestreams", {})),
+        segment_outputs=list(data.get("segment_outputs", [])),
+        highlights_output=str(data.get("highlights_output", "")),
     )

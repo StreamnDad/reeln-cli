@@ -22,6 +22,7 @@ class Hook(Enum):
     ON_HIGHLIGHTS_MERGED = "on_highlights_merged"
     ON_SEGMENT_START = "on_segment_start"
     ON_SEGMENT_COMPLETE = "on_segment_complete"
+    ON_FRAMES_EXTRACTED = "on_frames_extracted"
     ON_ERROR = "on_error"
 
 

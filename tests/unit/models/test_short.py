@@ -28,9 +28,19 @@ def test_crop_mode_crop() -> None:
     assert CropMode.CROP.value == "crop"
 
 
+def test_crop_mode_smart() -> None:
+    assert CropMode.SMART.value == "smart"
+
+
+def test_crop_mode_smart_pad() -> None:
+    assert CropMode.SMART_PAD.value == "smart_pad"
+
+
 def test_crop_mode_from_string() -> None:
     assert CropMode("pad") == CropMode.PAD
     assert CropMode("crop") == CropMode.CROP
+    assert CropMode("smart") == CropMode.SMART
+    assert CropMode("smart_pad") == CropMode.SMART_PAD
 
 
 def test_output_format_vertical() -> None:
@@ -104,6 +114,8 @@ def test_short_config_defaults(tmp_path: Path) -> None:
     assert cfg.crop_mode == CropMode.PAD
     assert cfg.anchor_x == 0.5
     assert cfg.anchor_y == 0.5
+    assert cfg.scale == 1.0
+    assert cfg.smart is False
     assert cfg.pad_color == "black"
     assert cfg.speed == 1.0
     assert cfg.lut is None
@@ -113,6 +125,7 @@ def test_short_config_defaults(tmp_path: Path) -> None:
     assert cfg.crf == 18
     assert cfg.audio_codec == "aac"
     assert cfg.audio_bitrate == "128k"
+    assert cfg.smart_zoom_frames == 5
 
 
 def test_short_config_custom_values(tmp_path: Path) -> None:
@@ -144,6 +157,32 @@ def test_short_config_custom_values(tmp_path: Path) -> None:
     assert cfg.lut == lut
     assert cfg.subtitle == sub
     assert cfg.codec == "libx265"
+
+
+def test_short_config_scale_custom(tmp_path: Path) -> None:
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4", scale=1.5)
+    assert cfg.scale == 1.5
+
+
+def test_short_config_smart_custom(tmp_path: Path) -> None:
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4", smart=True)
+    assert cfg.smart is True
+
+
+def test_short_config_smart_zoom_frames_custom(tmp_path: Path) -> None:
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4", smart_zoom_frames=10)
+    assert cfg.smart_zoom_frames == 10
+
+
+def test_short_config_branding_default_none(tmp_path: Path) -> None:
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4")
+    assert cfg.branding is None
+
+
+def test_short_config_branding_custom(tmp_path: Path) -> None:
+    brand = tmp_path / "brand.ass"
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4", branding=brand)
+    assert cfg.branding == brand
 
 
 def test_short_config_is_frozen(tmp_path: Path) -> None:

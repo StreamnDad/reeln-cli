@@ -13,7 +13,9 @@ from reeln.core.shorts import (
     build_audio_speed_filter,
     build_lut_filter,
     build_speed_filter,
+    build_speed_segments_filters,
     build_subtitle_filter,
+    validate_speed_segments,
 )
 from reeln.core.templates import render_template_file
 from reeln.models.config import AppConfig
@@ -82,8 +84,14 @@ def apply_profile_to_short(
         overrides["anchor_y"] = profile.anchor_y
     if profile.pad_color is not None:
         overrides["pad_color"] = profile.pad_color
+    if profile.scale is not None:
+        overrides["scale"] = profile.scale
+    if profile.smart is not None:
+        overrides["smart"] = profile.smart
     if profile.speed is not None:
         overrides["speed"] = profile.speed
+    if profile.speed_segments is not None:
+        overrides["speed_segments"] = profile.speed_segments
     if profile.lut is not None:
         overrides["lut"] = Path(profile.lut)
     if profile.codec is not None:
@@ -113,15 +121,29 @@ def build_profile_filter_chain(
 ) -> tuple[str | None, str | None]:
     """Build filter_complex and audio_filter for full-frame rendering.
 
-    Only applies: LUT -> speed -> subtitle. No crop/scale.
+    Only applies: LUT -> speed (or speed_segments) -> subtitle. No crop/scale.
     Returns ``(filter_complex, audio_filter)`` — either may be ``None``.
     """
+    has_speed = profile.speed is not None and profile.speed != 1.0
+    has_segments = profile.speed_segments is not None
+
+    if has_speed and has_segments:
+        raise RenderError("Cannot use both speed and speed_segments — they are mutually exclusive")
+
+    if has_segments:
+        assert profile.speed_segments is not None
+        validate_speed_segments(profile.speed_segments)
+        return _build_profile_speed_segments_chain(
+            profile, rendered_subtitle=rendered_subtitle
+        )
+
     filters: list[str] = []
 
     if profile.lut is not None:
         filters.append(build_lut_filter(Path(profile.lut)))
 
-    if profile.speed is not None and profile.speed != 1.0:
+    if has_speed:
+        assert profile.speed is not None
         filters.append(build_speed_filter(profile.speed))
 
     if rendered_subtitle is not None:
@@ -130,10 +152,52 @@ def build_profile_filter_chain(
     filter_complex = ",".join(filters) if filters else None
 
     audio_filter: str | None = None
-    if profile.speed is not None and profile.speed != 1.0:
+    if has_speed:
+        assert profile.speed is not None
         audio_filter = build_audio_speed_filter(profile.speed)
 
     return filter_complex, audio_filter
+
+
+def _build_profile_speed_segments_chain(
+    profile: RenderProfile,
+    *,
+    rendered_subtitle: Path | None = None,
+) -> tuple[str, None]:
+    """Build a full filter_complex for full-frame speed_segments rendering.
+
+    Graph: [0:v]{pre} → split/trim/speed/concat → {post}
+    Audio goes through filter_complex too (audio_filter returns None).
+    """
+    assert profile.speed_segments is not None
+
+    pre: list[str] = []
+    if profile.lut is not None:
+        pre.append(build_lut_filter(Path(profile.lut)))
+
+    post: list[str] = []
+    if rendered_subtitle is not None:
+        post.append(build_subtitle_filter(rendered_subtitle))
+
+    video_segs, audio_segs = build_speed_segments_filters(profile.speed_segments)
+
+    # Wire pre-filters
+    if pre:
+        video_graph = video_segs.replace("[_vsrc]", f"[0:v]{','.join(pre)},", 1)
+    else:
+        video_graph = video_segs.replace("[_vsrc]", "[0:v]", 1)
+
+    # Wire post-filters
+    if post:
+        video_graph = video_graph.replace("[_vout]", f"[_vout];[_vout]{','.join(post)}")
+    else:
+        video_graph = video_graph.replace("[_vout]", "")
+
+    # Wire audio
+    audio_graph = audio_segs.replace("[_asrc]", "[0:a]", 1)
+    audio_graph = audio_graph.replace("[_aout]", "")
+
+    return f"{video_graph};{audio_graph}", None
 
 
 def plan_full_frame(
@@ -151,6 +215,10 @@ def plan_full_frame(
     """
     if profile.speed is not None and not 0.5 <= profile.speed <= 2.0:
         raise RenderError(f"Speed must be 0.5-2.0, got {profile.speed}")
+    if profile.speed is not None and profile.speed != 1.0 and profile.speed_segments is not None:
+        raise RenderError("Cannot use both speed and speed_segments — they are mutually exclusive")
+    if profile.speed_segments is not None:
+        validate_speed_segments(profile.speed_segments)
 
     filter_complex, audio_filter = build_profile_filter_chain(profile, rendered_subtitle=rendered_subtitle)
 
@@ -187,9 +255,7 @@ def resolve_subtitle_for_profile(
     if profile.subtitle_template.startswith("builtin:"):
         from reeln.core.overlay import resolve_builtin_template
 
-        template_path = resolve_builtin_template(
-            profile.subtitle_template.removeprefix("builtin:")
-        )
+        template_path = resolve_builtin_template(profile.subtitle_template.removeprefix("builtin:"))
     else:
         template_path = Path(profile.subtitle_template).expanduser()
     rendered = render_template_file(template_path, context)

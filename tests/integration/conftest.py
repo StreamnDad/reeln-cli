@@ -40,7 +40,6 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-
 # ---------------------------------------------------------------------------
 # Game info fixtures
 # ---------------------------------------------------------------------------

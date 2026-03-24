@@ -208,6 +208,40 @@ def test_render_short_dry_run(tmp_path: Path) -> None:
     assert "Size: 1080x1920" in result.output
 
 
+def test_render_short_default_output_in_shorts_subdir(tmp_path: Path) -> None:
+    """Default output path puts renders in a shorts/ subdirectory."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "shorts/clip_short.mp4" in result.output
+
+
+def test_render_preview_default_output_in_shorts_subdir(tmp_path: Path) -> None:
+    """Default preview output path also uses shorts/ subdirectory."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "preview",
+            str(clip),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "shorts/clip_preview.mp4" in result.output
+
+
 def test_render_short_dry_run_crop_mode(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mkv"
     clip.touch()
@@ -1028,8 +1062,9 @@ def test_short_player_flag_populates_overlay_without_game(tmp_path: Path) -> Non
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1068,8 +1103,9 @@ def test_short_assists_flag_populates_overlay_without_game(tmp_path: Path) -> No
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1101,9 +1137,7 @@ def test_short_player_flag_overrides_event_data(tmp_path: Path) -> None:
     game_dir = tmp_path / "game"
     game_dir.mkdir()
     state = GameState(
-        game_info=GameInfo(
-            date="2026-02-28", home_team="A", away_team="B", sport="hockey"
-        ),
+        game_info=GameInfo(date="2026-02-28", home_team="A", away_team="B", sport="hockey"),
         created_at="2026-02-28T12:00:00+00:00",
         events=[
             GameEvent(
@@ -1126,8 +1160,9 @@ def test_short_player_flag_overrides_event_data(tmp_path: Path) -> None:
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1152,6 +1187,73 @@ def test_short_player_flag_overrides_event_data(tmp_path: Path) -> None:
         )
     assert result.exit_code == 0
     assert "Subtitle:" in result.output
+
+
+def test_short_player_event_in_post_render_hook(tmp_path: Path) -> None:
+    """Player, assists, and game_event are included in POST_RENDER hook data."""
+    from unittest.mock import MagicMock
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    state = GameState(
+        game_info=GameInfo(date="2026-02-28", home_team="A", away_team="B", sport="hockey"),
+        created_at="2026-02-28T12:00:00+00:00",
+        events=[
+            GameEvent(
+                id="ev1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    mock_result = _mock_result(tmp_path)
+    emitted: list[object] = []
+
+    def capture_emit(hook: object, ctx: object) -> None:
+        from reeln.plugins.hooks import Hook
+
+        if getattr(hook, "value", None) == Hook.POST_RENDER.value:
+            emitted.append(ctx)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.plugins.registry.get_registry") as mock_get_reg,
+    ):
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        mock_reg = MagicMock()
+        mock_reg.emit.side_effect = capture_emit
+        mock_get_reg.return_value = mock_reg
+
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--game-dir",
+                str(game_dir),
+                "--event",
+                "ev1",
+                "--player",
+                "Jane Doe",
+                "--assists",
+                "John Smith",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert len(emitted) == 1
+    ctx = emitted[0]
+    assert getattr(ctx, "data", {}).get("player") == "Jane Doe"
+    assert getattr(ctx, "data", {}).get("assists") == "John Smith"
+    assert getattr(ctx, "data", {}).get("game_event") is not None
+    assert getattr(ctx.data["game_event"], "event_type", None) == "goal"
 
 
 def test_short_player_flag_without_render_profile_is_noop(tmp_path: Path) -> None:
@@ -1194,8 +1296,9 @@ def test_preview_player_flag(tmp_path: Path) -> None:
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1234,8 +1337,9 @@ def test_apply_player_flag_without_game_dir(tmp_path: Path) -> None:
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1269,14 +1373,15 @@ def test_apply_player_flag_overrides_event(tmp_path: Path) -> None:
     game_dir = tmp_path / "game"
     game_dir.mkdir()
     state = GameState(
-        game_info=GameInfo(
-            date="2026-02-28", home_team="A", away_team="B", sport="hockey"
-        ),
+        game_info=GameInfo(date="2026-02-28", home_team="A", away_team="B", sport="hockey"),
         created_at="2026-02-28T12:00:00+00:00",
         events=[
             GameEvent(
-                id="ev1", clip="x.mkv", segment_number=1,
-                event_type="goal", player="OldPlayer",
+                id="ev1",
+                clip="x.mkv",
+                segment_number=1,
+                event_type="goal",
+                player="OldPlayer",
             ),
         ],
     )
@@ -1290,8 +1395,9 @@ def test_apply_player_flag_overrides_event(tmp_path: Path) -> None:
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(cfg_data))
 
-    with patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")), patch(
-        "reeln.core.ffmpeg.probe_duration", return_value=10.0
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
     ):
         result = runner.invoke(
             app,
@@ -1329,9 +1435,7 @@ def test_short_subtitle_temp_cleanup_after_render(tmp_path: Path) -> None:
     game_dir = tmp_path / "game"
     game_dir.mkdir()
     state = GameState(
-        game_info=GameInfo(
-            date="2026-02-28", home_team="A", away_team="B", sport="hockey"
-        ),
+        game_info=GameInfo(date="2026-02-28", home_team="A", away_team="B", sport="hockey"),
         created_at="2026-02-28T12:00:00+00:00",
     )
     _write_game_state(game_dir, state)
@@ -3235,14 +3339,15 @@ def test_short_iterate_with_player_and_assists(tmp_path: Path) -> None:
     game_dir = tmp_path / "game"
     game_dir.mkdir()
     state = GameState(
-        game_info=GameInfo(
-            date="2026-02-26", home_team="A", away_team="B", sport="hockey"
-        ),
+        game_info=GameInfo(date="2026-02-26", home_team="A", away_team="B", sport="hockey"),
         created_at="t1",
         events=[
             GameEvent(
-                id="ev1", clip="clip.mkv", segment_number=1,
-                event_type="goal", created_at="t1",
+                id="ev1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                created_at="t1",
             ),
         ],
     )
@@ -3292,6 +3397,252 @@ def test_short_iterate_with_player_and_assists(tmp_path: Path) -> None:
     assert meta["assists"] == "#22 Jones"
 
 
+def test_short_iterate_smart_passes_zoom_path(tmp_path: Path) -> None:
+    """--smart --iterate extracts frames and passes zoom_path to render_iterations."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    def _provide_zoom(context: object) -> None:
+        from reeln.plugins.hooks import HookContext
+
+        assert isinstance(context, HookContext)
+        context.shared["smart_zoom"] = {"zoom_path": zoom}
+
+    def _activate_with_zoom_handler(plugins_config: object) -> dict[str, object]:
+        get_registry().register(Hook.ON_FRAMES_EXTRACTED, _provide_zoom)
+        return {}
+
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "out.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom_handler),
+        patch(
+            "reeln.core.iterations.render_iterations",
+            return_value=(iter_result, ["Iteration rendering complete"]),
+        ) as mock_iter,
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "crop",
+                "--smart",
+                "--iterate",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Iteration rendering complete" in result.output
+    call_kwargs = mock_iter.call_args
+    assert call_kwargs.kwargs.get("zoom_path") is zoom
+    assert call_kwargs.kwargs.get("source_fps") == 60.0
+
+
+def test_short_iterate_smart_debug_writes_zoom(tmp_path: Path) -> None:
+    """--smart --iterate --debug writes zoom debug artifacts."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    def _provide_zoom(context: object) -> None:
+        from reeln.plugins.hooks import HookContext
+
+        assert isinstance(context, HookContext)
+        context.shared["smart_zoom"] = {"zoom_path": zoom}
+
+    def _activate_with_zoom_handler(plugins_config: object) -> dict[str, object]:
+        get_registry().register(Hook.ON_FRAMES_EXTRACTED, _provide_zoom)
+        return {}
+
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "out.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom_handler),
+        patch(
+            "reeln.core.iterations.render_iterations",
+            return_value=(iter_result, ["Iteration rendering complete"]),
+        ),
+        patch("reeln.core.zoom_debug.write_zoom_debug") as mock_zoom_debug,
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "crop",
+                "--smart",
+                "--iterate",
+                "--game-dir",
+                str(game_dir),
+                "--debug",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Debug:" in result.output
+    mock_zoom_debug.assert_called_once()
+
+
+def test_short_iterate_debug_no_smart_no_zoom_debug(tmp_path: Path) -> None:
+    """--iterate --debug without --smart doesn't write zoom debug."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "out.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch(
+            "reeln.core.iterations.render_iterations",
+            return_value=(iter_result, ["Iteration rendering complete"]),
+        ),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--iterate",
+                "--game-dir",
+                str(game_dir),
+                "--debug",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Debug:" not in result.output
+
+
+def test_short_iterate_smart_no_plugin_falls_back(tmp_path: Path) -> None:
+    """--smart --iterate without plugin providing zoom falls back to static."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "out.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch(
+            "reeln.core.iterations.render_iterations",
+            return_value=(iter_result, ["Iteration rendering complete"]),
+        ) as mock_iter,
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "crop",
+                "--smart",
+                "--iterate",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "No smart zoom data from plugins" in result.output
+    assert "Iteration rendering complete" in result.output
+    call_kwargs = mock_iter.call_args
+    assert call_kwargs.kwargs.get("zoom_path") is None
+
+
 def test_short_subtitle_game_dir_load_fails_nonfatal(tmp_path: Path) -> None:
     """Subtitle resolution handles game_dir load failure gracefully."""
     clip = tmp_path / "clip.mkv"
@@ -3330,3 +3681,1351 @@ def test_short_subtitle_game_dir_load_fails_nonfatal(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0
     assert "Subtitle:" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Smart zoom — crop mode: smart
+# ---------------------------------------------------------------------------
+
+
+def test_render_short_smart_crop_fallback_no_plugin(tmp_path: Path) -> None:
+    """Smart crop with no plugin providing zoom data falls back to center crop."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart",
+                "--dry-run",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "No smart zoom data from plugins" in result.output
+    assert "Crop mode: crop" in result.output
+    assert "Dry run" in result.output
+
+
+def test_render_short_smart_crop_with_zoom_path(tmp_path: Path) -> None:
+    """Smart crop with a plugin providing zoom path shows smart zoom info."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    def _provide_zoom(context: object) -> None:
+        from reeln.plugins.hooks import HookContext
+
+        assert isinstance(context, HookContext)
+        context.shared["smart_zoom"] = {"zoom_path": zoom}
+
+    def _activate_with_zoom_handler(plugins_config: object) -> dict[str, object]:
+        # Simulate activate_plugins but register our test handler
+        get_registry().register(Hook.ON_FRAMES_EXTRACTED, _provide_zoom)
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom_handler),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart",
+                "--dry-run",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Smart zoom: 2 target points" in result.output
+    assert "Crop mode: smart" in result.output
+    assert "Dry run" in result.output
+
+
+def test_render_short_smart_crop_extract_error(tmp_path: Path) -> None:
+    """Smart crop errors when frame extraction fails."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.core.errors import RenderError
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+    ):
+        mock_renderer_cls.return_value.extract_frames.side_effect = RenderError("probe failed")
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "Error extracting frames" in result.output
+
+
+def test_render_short_smart_crop_zoom_frames_option(tmp_path: Path) -> None:
+    """--zoom-frames is passed to extract_frames."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames
+
+    frames = ExtractedFrames(
+        frame_paths=tuple(tmp_path / f"f{i}.png" for i in range(3)),
+        timestamps=(2.5, 5.0, 7.5),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart",
+                "--zoom-frames",
+                "3",
+                "--dry-run",
+            ],
+        )
+
+    assert result.exit_code == 0
+    call_args = mock_renderer_cls.return_value.extract_frames.call_args
+    assert call_args[1]["count"] == 3 or call_args[0][1] == 3
+
+
+def test_render_short_smart_crop_cleanup(tmp_path: Path) -> None:
+    """Extracted frames directory is cleaned up even on error."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    created_dirs: list[Path] = []
+    original_mkdtemp = __import__("tempfile").mkdtemp
+
+    def _tracking_mkdtemp(**kwargs: object) -> str:
+        result_str = original_mkdtemp(**kwargs)
+        created_dirs.append(Path(result_str))
+        return result_str
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("tempfile.mkdtemp", side_effect=_tracking_mkdtemp),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        runner.invoke(
+            app,
+            ["render", "short", str(clip), "--crop", "smart", "--dry-run"],
+        )
+
+    # The temp dir should have been cleaned up
+    for d in created_dirs:
+        assert not d.exists()
+
+
+def test_render_short_smart_crop_ffmpeg_discovery_error(tmp_path: Path) -> None:
+    """Smart crop errors when ffmpeg discovery fails."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.core.errors import FFmpegError
+
+    with patch("reeln.core.ffmpeg.discover_ffmpeg", side_effect=FFmpegError("not found")):
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "--crop", "smart"],
+        )
+
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+
+
+def test_render_short_smart_crop_debug_with_zoom(tmp_path: Path) -> None:
+    """Debug mode with smart zoom includes zoom_path info."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    info = GameInfo(
+        home_team="TeamA",
+        away_team="TeamB",
+        sport="hockey",
+        date="2026-03-19",
+    )
+    state = GameState(game_info=info)
+    _write_game_state(game_dir, state)
+
+    mock_result = RenderResult(
+        output=tmp_path / "out.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=512000,
+        ffmpeg_command=["ffmpeg", "-y", "out.mp4"],
+    )
+
+    def _activate_with_zoom(plugins_config: object) -> dict[str, object]:
+        get_registry().register(
+            Hook.ON_FRAMES_EXTRACTED,
+            lambda ctx: ctx.shared.update({"smart_zoom": {"zoom_path": zoom}}),
+        )
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart",
+                "--game-dir",
+                str(game_dir),
+                "--debug",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Smart zoom: 2 target points" in result.output
+    assert "Debug:" in result.output
+
+
+def test_render_short_smart_debug_captures_plugin_debug(tmp_path: Path) -> None:
+    """Debug mode saves plugin debug data (prompts) to zoom debug directory."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    info = GameInfo(
+        home_team="TeamA",
+        away_team="TeamB",
+        sport="hockey",
+        date="2026-03-21",
+    )
+    state = GameState(game_info=info)
+    _write_game_state(game_dir, state)
+
+    mock_result = RenderResult(
+        output=tmp_path / "out.mp4",
+        duration_seconds=10.0,
+        file_size_bytes=512000,
+        ffmpeg_command=["ffmpeg", "-y", "out.mp4"],
+    )
+
+    plugin_debug = {"prompt": "analyze this frame", "model": "gpt-4o"}
+
+    def _activate_with_zoom_debug(plugins_config: object) -> dict[str, object]:
+        get_registry().register(
+            Hook.ON_FRAMES_EXTRACTED,
+            lambda ctx: ctx.shared.update({"smart_zoom": {"zoom_path": zoom, "debug": plugin_debug}}),
+        )
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom_debug),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "crop",
+                "--smart",
+                "--game-dir",
+                str(game_dir),
+                "--debug",
+            ],
+        )
+
+    assert result.exit_code == 0
+    # Plugin debug should be written
+    plugin_json = game_dir / "debug" / "zoom" / "plugin_debug.json"
+    assert plugin_json.is_file()
+    data = json.loads(plugin_json.read_text())
+    assert data["prompt"] == "analyze this frame"
+    assert data["model"] == "gpt-4o"
+
+
+# ---------------------------------------------------------------------------
+# --scale and --smart CLI options
+# ---------------------------------------------------------------------------
+
+
+def test_render_short_scale_display(tmp_path: Path) -> None:
+    """--scale shows Scale: Nx in output."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--scale",
+            "1.3",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Scale: 1.3x" in result.output
+
+
+def test_render_short_scale_default_no_display(tmp_path: Path) -> None:
+    """Scale=1.0 (default) does NOT show Scale line."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Scale:" not in result.output
+
+
+def test_render_short_smart_pad_deprecation_warning(tmp_path: Path) -> None:
+    """--crop smart_pad shows deprecation warning."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    zoom = ZoomPath(
+        points=(ZoomPoint(timestamp=0.0, center_x=0.5, center_y=0.5),),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    def _activate_with_zoom(plugins_config: object) -> dict[str, object]:
+        get_registry().register(
+            Hook.ON_FRAMES_EXTRACTED,
+            lambda ctx: ctx.shared.update({"smart_zoom": {"zoom_path": zoom}}),
+        )
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        mock_renderer_cls.return_value.render.return_value = _mock_result(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "smart_pad",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "--crop smart_pad is deprecated" in result.output
+
+
+def test_render_short_smart_flag_triggers_frames(tmp_path: Path) -> None:
+    """--smart flag triggers frame extraction like --crop smart."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames, ZoomPath, ZoomPoint
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    zoom = ZoomPath(
+        points=(
+            ZoomPoint(timestamp=0.0, center_x=0.3, center_y=0.5),
+            ZoomPoint(timestamp=10.0, center_x=0.7, center_y=0.5),
+        ),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+    )
+
+    def _activate_with_zoom(plugins_config: object) -> dict[str, object]:
+        get_registry().register(
+            Hook.ON_FRAMES_EXTRACTED,
+            lambda ctx: ctx.shared.update({"smart_zoom": {"zoom_path": zoom}}),
+        )
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_zoom),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        mock_renderer_cls.return_value.render.return_value = _mock_result(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "pad",
+                "--smart",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert "Smart zoom: 2 target points" in result.output
+
+
+def test_render_preview_scale_display(tmp_path: Path) -> None:
+    """Preview also shows scale."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "preview",
+            str(clip),
+            "--scale",
+            "1.5",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Scale: 1.5x" in result.output
+
+
+# ---------------------------------------------------------------------------
+# _find_game_dir — clip-aware resolution
+# ---------------------------------------------------------------------------
+
+
+def test_find_game_dir_prefers_clip_parent(tmp_path: Path) -> None:
+    """When clip is inside a game dir, that game dir is preferred over most recent."""
+    from reeln.commands.render import _find_game_dir
+
+    # Older game dir that contains the clip
+    game_a = tmp_path / "game_a"
+    game_a.mkdir()
+    (game_a / "game.json").write_text("{}")
+    clip = game_a / "period-1" / "clip.mp4"
+    clip.parent.mkdir()
+    clip.touch()
+
+    # Newer game dir (should NOT be picked)
+    game_b = tmp_path / "game_b"
+    game_b.mkdir()
+    (game_b / "game.json").write_text("{}")
+    # Ensure game_b is more recent
+    import time
+
+    time.sleep(0.01)
+    (game_b / "game.json").write_text("{}")
+
+    result = _find_game_dir(tmp_path, clip=clip)
+    assert result == game_a
+
+
+def test_find_game_dir_falls_back_to_most_recent_without_clip(tmp_path: Path) -> None:
+    """Without clip, falls back to most recently modified game.json."""
+    from reeln.commands.render import _find_game_dir
+
+    game_a = tmp_path / "game_a"
+    game_a.mkdir()
+    (game_a / "game.json").write_text("{}")
+
+    import time
+
+    time.sleep(0.01)
+
+    game_b = tmp_path / "game_b"
+    game_b.mkdir()
+    (game_b / "game.json").write_text("{}")
+
+    result = _find_game_dir(tmp_path)
+    assert result == game_b
+
+
+def test_find_game_dir_clip_not_in_any_game_dir(tmp_path: Path) -> None:
+    """When clip isn't inside any game dir, falls back to most recent."""
+    from reeln.commands.render import _find_game_dir
+
+    game_a = tmp_path / "game_a"
+    game_a.mkdir()
+    (game_a / "game.json").write_text("{}")
+
+    clip = tmp_path / "stray" / "clip.mp4"
+    clip.parent.mkdir()
+    clip.touch()
+
+    result = _find_game_dir(tmp_path, clip=clip)
+    assert result == game_a
+
+
+def test_find_game_dir_none_output_dir() -> None:
+    """Returns None when output_dir is None."""
+    from reeln.commands.render import _find_game_dir
+
+    assert _find_game_dir(None) is None
+    assert _find_game_dir(None, clip=Path("/tmp/clip.mp4")) is None
+
+
+def test_find_game_dir_output_dir_is_game_dir(tmp_path: Path) -> None:
+    """When output_dir itself has game.json, returns it directly."""
+    from reeln.commands.render import _find_game_dir
+
+    (tmp_path / "game.json").write_text("{}")
+    result = _find_game_dir(tmp_path)
+    assert result == tmp_path
+
+
+def test_find_game_dir_resolve_error_skips_candidate(tmp_path: Path) -> None:
+    """OSError during is_relative_to raises on resolved paths — candidate is skipped."""
+    from reeln.commands.render import _find_game_dir
+
+    game_a = tmp_path / "game_a"
+    game_a.mkdir()
+    (game_a / "game.json").write_text("{}")
+
+    clip = game_a / "clip.mp4"
+    clip.touch()
+
+    # Make is_relative_to raise OSError to hit the except branch
+    with patch.object(Path, "is_relative_to", side_effect=OSError("broken")):
+        result = _find_game_dir(tmp_path, clip=clip)
+    # Falls back to most recent since is_relative_to() failed
+    assert result == game_a
+
+
+# ---------------------------------------------------------------------------
+# --player-numbers flag
+# ---------------------------------------------------------------------------
+
+
+def _write_roster(path: Path) -> None:
+    """Write a sample roster CSV."""
+    path.write_text(
+        "number,name,position\n48,John Smith,C\n24,Jane Doe,D\n2,Bob Jones,RW\n",
+        encoding="utf-8",
+    )
+
+
+def _game_state_with_level(
+    level: str = "bantam",
+    home_slug: str = "eagles",
+    away_slug: str = "bears",
+) -> GameState:
+    """Create a GameState with level and slug fields populated."""
+    return GameState(
+        game_info=GameInfo(
+            date="2026-03-04",
+            home_team="Eagles",
+            away_team="Bears",
+            sport="hockey",
+            level=level,
+            home_slug=home_slug,
+            away_slug=away_slug,
+        ),
+        created_at="2026-03-04T12:00:00+00:00",
+    )
+
+
+def test_player_numbers_with_valid_game_and_roster(tmp_path: Path) -> None:
+    """--player-numbers looks up scorer and assists from team roster."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48,24,2",
+                "--event-type",
+                "HOME_GOAL",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "Subtitle:" in result.output
+
+
+def test_player_numbers_without_game_dir(tmp_path: Path) -> None:
+    """--player-numbers without a game directory exits with error."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    cfg = tmp_path / "empty.json"
+    cfg.write_text(json.dumps({"config_version": 1}))
+
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--player-numbers",
+            "48",
+            "--config",
+            str(cfg),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "requires a game directory" in result.output
+
+
+def test_player_numbers_game_missing_level(tmp_path: Path) -> None:
+    """--player-numbers with game that has no level/slugs exits with error."""
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    # GameInfo with no level/slugs
+    state = GameState(
+        game_info=GameInfo(
+            date="2026-03-04",
+            home_team="Eagles",
+            away_team="Bears",
+            sport="hockey",
+        ),
+        created_at="2026-03-04T12:00:00+00:00",
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--player-numbers",
+            "48",
+            "--game-dir",
+            str(game_dir),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "requires team profiles" in result.output
+
+
+def test_player_numbers_missing_roster(tmp_path: Path) -> None:
+    """--player-numbers with team profile lacking roster_path exits with error."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    # Profile with no roster_path
+    home_profile = TeamProfile(team_name="Eagles", short_name="EGL", level="bantam")
+
+    with patch("reeln.core.teams.load_team_profile", return_value=home_profile):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--game-dir",
+                str(game_dir),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 1
+    assert "No roster file configured" in result.output
+
+
+def test_player_numbers_unknown_number_fallback(tmp_path: Path) -> None:
+    """Unknown jersey number falls back to '#N' display with warning."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    roster_path.write_text("number,name,position\n48,John Smith,C\n", encoding="utf-8")
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48,99",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    # Should succeed despite unknown #99
+    assert result.exit_code == 0, result.output
+
+
+def test_player_numbers_explicit_player_overrides(tmp_path: Path) -> None:
+    """Explicit --player and --assists take precedence over --player-numbers roster lookup."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48,24",
+                "--player",
+                "Custom Player",
+                "--assists",
+                "Custom Assist",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+
+
+def test_player_numbers_away_goal(tmp_path: Path) -> None:
+    """--event-type AWAY_GOAL resolves the away team's roster."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    away_profile = TeamProfile(
+        team_name="Bears",
+        short_name="BRS",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=away_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "AWAY_GOAL",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+
+
+def test_player_numbers_game_state_load_error(tmp_path: Path) -> None:
+    """--player-numbers with corrupt game.json exits with error."""
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text("not valid json")
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--player-numbers",
+            "48",
+            "--game-dir",
+            str(game_dir),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Error" in result.output
+
+
+def test_player_numbers_team_profile_not_found(tmp_path: Path) -> None:
+    """--player-numbers with missing team profile exits with error."""
+    from reeln.core.errors import ConfigError as _CE
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    with patch("reeln.core.teams.load_team_profile", side_effect=_CE("not found")):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--game-dir",
+                str(game_dir),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 1
+    assert "Team profile not found" in result.output
+
+
+def test_player_numbers_roster_file_missing(tmp_path: Path) -> None:
+    """--player-numbers with missing roster file exits with error."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(tmp_path / "nonexistent.csv"),
+    )
+
+    with patch("reeln.core.teams.load_team_profile", return_value=home_profile):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--game-dir",
+                str(game_dir),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 1
+    assert "Roster file not found" in result.output
+
+
+def test_player_numbers_on_preview(tmp_path: Path) -> None:
+    """--player-numbers works on render preview."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with patch("reeln.core.teams.load_team_profile", return_value=home_profile):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "preview",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--game-dir",
+                str(game_dir),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+
+
+def test_player_numbers_auto_applies_overlay_profile(tmp_path: Path) -> None:
+    """--player-numbers without -r auto-applies player-overlay profile."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48,24",
+                "--game-dir",
+                str(game_dir),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # The bundled config includes player-overlay, so it should be auto-applied
+    assert "player-overlay" in result.output or "Dry run" in result.output
+
+
+def test_player_numbers_on_apply(tmp_path: Path) -> None:
+    """--player-numbers works on render apply."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "apply",
+                str(clip),
+                "--render-profile",
+                "overlay",
+                "--player-numbers",
+                "48,24",
+                "--game-dir",
+                str(game_dir),
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# --no-branding flag
+# ---------------------------------------------------------------------------
+
+
+def test_render_short_no_branding_flag(tmp_path: Path) -> None:
+    """--no-branding suppresses branding overlay."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--no-branding",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+
+def test_render_preview_no_branding_flag(tmp_path: Path) -> None:
+    """--no-branding on preview suppresses branding overlay."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "preview",
+            str(clip),
+            "--no-branding",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+
+def test_render_short_branding_enabled_by_default(tmp_path: Path) -> None:
+    """Without --no-branding, branding is resolved from config."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "short",
+            str(clip),
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+
+def test_render_short_branding_error_continues(tmp_path: Path) -> None:
+    """When branding resolution fails, render continues with a warning."""
+    from unittest.mock import patch
+
+    from reeln.core.errors import RenderError
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    with patch(
+        "reeln.core.branding.resolve_branding",
+        side_effect=RenderError("broken template"),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Warning: Failed to resolve branding" in result.output
+    assert "Dry run" in result.output

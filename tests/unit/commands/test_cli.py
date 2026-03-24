@@ -279,3 +279,42 @@ def test_doctor_help() -> None:
     result = runner.invoke(app, ["doctor", "--help"])
     assert result.exit_code == 0
     assert "health checks" in result.output.lower() or "doctor" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# --no-enforce-hooks
+# ---------------------------------------------------------------------------
+
+
+def test_no_enforce_hooks_flag_in_help() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "--no-enforce-hooks" in result.output
+
+
+def test_no_enforce_hooks_sets_override() -> None:
+    """--no-enforce-hooks sets the module-level override flag."""
+    import reeln.plugins.loader as loader_mod
+
+    original = loader_mod._cli_no_enforce_hooks
+    try:
+        # Use "config show" to trigger the callback body (--help exits before it)
+        with patch("reeln.core.config.load_config", return_value=AppConfig()):
+            runner.invoke(app, ["--no-enforce-hooks", "config", "show"])
+        assert loader_mod._cli_no_enforce_hooks is True
+    finally:
+        loader_mod._cli_no_enforce_hooks = original
+
+
+def test_no_enforce_hooks_not_set_by_default() -> None:
+    """Without the flag, the override remains False."""
+    import reeln.plugins.loader as loader_mod
+
+    original = loader_mod._cli_no_enforce_hooks
+    loader_mod._cli_no_enforce_hooks = False
+    try:
+        with patch("reeln.core.config.load_config", return_value=AppConfig()):
+            runner.invoke(app, ["config", "show"])
+        assert loader_mod._cli_no_enforce_hooks is False
+    finally:
+        loader_mod._cli_no_enforce_hooks = original

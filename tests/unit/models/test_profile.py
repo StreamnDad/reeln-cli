@@ -7,6 +7,7 @@ import pytest
 from reeln.models.profile import (
     IterationConfig,
     RenderProfile,
+    SpeedSegment,
     dict_to_iteration_config,
     dict_to_render_profile,
     iteration_config_to_dict,
@@ -24,7 +25,10 @@ def test_render_profile_defaults() -> None:
     assert profile.width is None
     assert profile.height is None
     assert profile.crop_mode is None
+    assert profile.scale is None
+    assert profile.smart is None
     assert profile.speed is None
+    assert profile.speed_segments is None
     assert profile.lut is None
     assert profile.subtitle_template is None
     assert profile.codec is None
@@ -49,6 +53,12 @@ def test_render_profile_with_values() -> None:
     assert profile.subtitle_template == "goal.ass"
 
 
+def test_render_profile_scale_and_smart() -> None:
+    profile = RenderProfile(name="zoomed", scale=1.5, smart=True)
+    assert profile.scale == 1.5
+    assert profile.smart is True
+
+
 def test_render_profile_all_fields() -> None:
     profile = RenderProfile(
         name="full",
@@ -58,6 +68,8 @@ def test_render_profile_all_fields() -> None:
         anchor_x=0.3,
         anchor_y=0.7,
         pad_color="white",
+        scale=1.3,
+        smart=True,
         speed=2.0,
         lut="cinematic.cube",
         subtitle_template="overlay.ass",
@@ -72,6 +84,8 @@ def test_render_profile_all_fields() -> None:
     assert profile.anchor_x == 0.3
     assert profile.anchor_y == 0.7
     assert profile.pad_color == "white"
+    assert profile.scale == 1.3
+    assert profile.smart is True
     assert profile.preset == "slow"
     assert profile.audio_codec == "opus"
     assert profile.audio_bitrate == "192k"
@@ -81,6 +95,39 @@ def test_render_profile_is_frozen() -> None:
     profile = RenderProfile(name="test")
     with pytest.raises(AttributeError):
         profile.name = "other"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# SpeedSegment
+# ---------------------------------------------------------------------------
+
+
+def test_speed_segment_creation() -> None:
+    seg = SpeedSegment(speed=0.5, until=5.0)
+    assert seg.speed == 0.5
+    assert seg.until == 5.0
+
+
+def test_speed_segment_defaults() -> None:
+    seg = SpeedSegment(speed=1.0)
+    assert seg.until is None
+
+
+def test_speed_segment_is_frozen() -> None:
+    seg = SpeedSegment(speed=1.0)
+    with pytest.raises(AttributeError):
+        seg.speed = 2.0  # type: ignore[misc]
+
+
+def test_render_profile_with_speed_segments() -> None:
+    segs = (
+        SpeedSegment(speed=1.0, until=5.0),
+        SpeedSegment(speed=0.5, until=8.0),
+        SpeedSegment(speed=1.0),
+    )
+    profile = RenderProfile(name="variable", speed_segments=segs)
+    assert profile.speed_segments == segs
+    assert profile.speed is None
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +205,19 @@ def test_render_profile_to_dict_with_values() -> None:
     assert d == {"speed": 0.5, "codec": "libx265", "crf": 22}
 
 
+def test_render_profile_to_dict_scale_and_smart() -> None:
+    profile = RenderProfile(name="zoomed", scale=1.5, smart=True)
+    d = render_profile_to_dict(profile)
+    assert d == {"scale": 1.5, "smart": True}
+
+
+def test_render_profile_to_dict_smart_false_included() -> None:
+    """smart=False is not None, so it should be serialized."""
+    profile = RenderProfile(name="no-smart", smart=False)
+    d = render_profile_to_dict(profile)
+    assert d == {"smart": False}
+
+
 def test_render_profile_to_dict_all_fields() -> None:
     profile = RenderProfile(
         name="full",
@@ -167,6 +227,8 @@ def test_render_profile_to_dict_all_fields() -> None:
         anchor_x=0.5,
         anchor_y=0.5,
         pad_color="black",
+        scale=1.3,
+        smart=True,
         speed=1.0,
         lut="warm.cube",
         subtitle_template="overlay.ass",
@@ -177,7 +239,7 @@ def test_render_profile_to_dict_all_fields() -> None:
         audio_bitrate="128k",
     )
     d = render_profile_to_dict(profile)
-    assert len(d) == 14  # all fields except name
+    assert len(d) == 16  # all fields except name
 
 
 def test_dict_to_render_profile_minimal() -> None:
@@ -195,6 +257,21 @@ def test_dict_to_render_profile_with_values() -> None:
     assert profile.codec == "libx265"
     assert profile.crf == 22
     assert profile.width is None
+    assert profile.scale is None
+    assert profile.smart is None
+
+
+def test_dict_to_render_profile_scale_and_smart() -> None:
+    data = {"scale": 1.3, "smart": True}
+    profile = dict_to_render_profile("zoomed", data)
+    assert profile.scale == 1.3
+    assert profile.smart is True
+
+
+def test_dict_to_render_profile_smart_false() -> None:
+    data = {"smart": False}
+    profile = dict_to_render_profile("no-smart", data)
+    assert profile.smart is False
 
 
 def test_render_profile_round_trip() -> None:
@@ -206,6 +283,8 @@ def test_render_profile_round_trip() -> None:
         anchor_x=0.5,
         anchor_y=0.5,
         pad_color="black",
+        scale=1.3,
+        smart=True,
         speed=0.5,
         lut="warm.cube",
         subtitle_template="overlay.ass",
@@ -217,6 +296,72 @@ def test_render_profile_round_trip() -> None:
     )
     d = render_profile_to_dict(original)
     restored = dict_to_render_profile("full", d)
+    assert restored == original
+
+
+# ---------------------------------------------------------------------------
+# Serialization: SpeedSegment / speed_segments
+# ---------------------------------------------------------------------------
+
+
+def test_render_profile_to_dict_speed_segments() -> None:
+    segs = (
+        SpeedSegment(speed=1.0, until=5.0),
+        SpeedSegment(speed=0.5, until=8.0),
+        SpeedSegment(speed=1.0),
+    )
+    profile = RenderProfile(name="var", speed_segments=segs)
+    d = render_profile_to_dict(profile)
+    assert d == {
+        "speed_segments": [
+            {"speed": 1.0, "until": 5.0},
+            {"speed": 0.5, "until": 8.0},
+            {"speed": 1.0},
+        ]
+    }
+
+
+def test_render_profile_to_dict_speed_segments_none() -> None:
+    profile = RenderProfile(name="no-segs")
+    d = render_profile_to_dict(profile)
+    assert "speed_segments" not in d
+
+
+def test_dict_to_render_profile_speed_segments() -> None:
+    data = {
+        "speed_segments": [
+            {"speed": 1.0, "until": 5.0},
+            {"speed": 0.5, "until": 8.0},
+            {"speed": 1.0},
+        ]
+    }
+    profile = dict_to_render_profile("var", data)
+    assert profile.speed_segments is not None
+    assert len(profile.speed_segments) == 3
+    assert profile.speed_segments[0] == SpeedSegment(speed=1.0, until=5.0)
+    assert profile.speed_segments[1] == SpeedSegment(speed=0.5, until=8.0)
+    assert profile.speed_segments[2] == SpeedSegment(speed=1.0, until=None)
+
+
+def test_dict_to_render_profile_speed_segments_none() -> None:
+    profile = dict_to_render_profile("no-segs", {})
+    assert profile.speed_segments is None
+
+
+def test_dict_to_render_profile_speed_segments_non_list_ignored() -> None:
+    profile = dict_to_render_profile("bad", {"speed_segments": "invalid"})
+    assert profile.speed_segments is None
+
+
+def test_speed_segments_round_trip() -> None:
+    segs = (
+        SpeedSegment(speed=1.0, until=5.0),
+        SpeedSegment(speed=0.5, until=8.0),
+        SpeedSegment(speed=1.0),
+    )
+    original = RenderProfile(name="var", speed_segments=segs)
+    d = render_profile_to_dict(original)
+    restored = dict_to_render_profile("var", d)
     assert restored == original
 
 

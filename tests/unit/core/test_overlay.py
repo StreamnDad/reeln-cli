@@ -30,6 +30,11 @@ class TestResolveBuiltinTemplate:
         with pytest.raises(RenderError, match="Builtin template not found"):
             resolve_builtin_template("nonexistent_template")
 
+    def test_branding_template(self) -> None:
+        path = resolve_builtin_template("branding")
+        assert path.is_file()
+        assert path.name == "branding.ass"
+
 
 # ---------------------------------------------------------------------------
 # overlay_font_size
@@ -161,6 +166,7 @@ class TestBuildOverlayContext:
             "home_team": "Roseville",
             "away_team": "Burnsville",
             "sport": "hockey",
+            "level": "bantam",
             "player": "#17 Smith",
         }
         defaults.update(kwargs)
@@ -174,14 +180,15 @@ class TestBuildOverlayContext:
         assert result.get("goal_scorer_text") == "#17 Smith"
         assert result.get("goal_assist_1") == "#22 Jones"
         assert result.get("goal_assist_2") == "#5 Brown"
-        assert result.get("goal_scorer_team") == "Roseville"
-        assert result.get("team_level") == "hockey"
+        assert result.get("goal_scorer_team") == "ROSEVILLE"
+        assert result.get("team_level") == "BANTAM"
 
         # Timing: assists visible
         assert result.get("scorer_start") == format_ass_time(0.0)
-        assert result.get("scorer_end") == format_ass_time(8.0)
+        assert result.get("scorer_end") == format_ass_time(9.0)
         assert result.get("assist_start") == format_ass_time(0.0)
-        assert result.get("assist_end") == format_ass_time(8.0)
+        assert result.get("assist_end") == format_ass_time(9.0)
+        assert result.get("box_end") == format_ass_time(9.0)
 
     def test_no_assists_hides_assist_timing(self) -> None:
         ctx = self._base_ctx()
@@ -192,7 +199,7 @@ class TestBuildOverlayContext:
         # Assist end time should be 0 (hidden)
         assert result.get("assist_end") == format_ass_time(0.0)
         # Scorer still visible
-        assert result.get("scorer_end") == format_ass_time(10.0)
+        assert result.get("scorer_end") == format_ass_time(11.0)
 
     def test_no_player(self) -> None:
         ctx = self._base_ctx(player="")
@@ -297,7 +304,8 @@ class TestBuildOverlayContext:
     def test_duration_default(self) -> None:
         ctx = self._base_ctx()
         result = build_overlay_context(ctx, event_metadata={})
-        assert result.get("scorer_end") == format_ass_time(10.0)
+        assert result.get("scorer_end") == format_ass_time(11.0)
+        assert result.get("box_end") == format_ass_time(11.0)
 
     def test_none_event_metadata(self) -> None:
         ctx = self._base_ctx()
@@ -315,3 +323,47 @@ class TestBuildOverlayContext:
         ctx = self._base_ctx()
         result = build_overlay_context(ctx, event_metadata={})
         assert result.get("ass_team_text_color") == rgb_to_ass((255, 255, 255), 0x40)
+
+    def test_scoring_team_overrides_home_team(self) -> None:
+        ctx = self._base_ctx()
+        result = build_overlay_context(ctx, event_metadata={}, scoring_team="Bears")
+        assert result.get("goal_scorer_team") == "BEARS"
+
+    def test_team_level_uses_level_not_sport(self) -> None:
+        ctx = self._base_ctx(level="2016")
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("team_level") == "2016"
+
+    def test_team_level_empty_when_no_level(self) -> None:
+        ctx = self._base_ctx(level="")
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("team_level") == ""
+
+    def test_scoring_team_none_uses_home_team(self) -> None:
+        ctx = self._base_ctx()
+        result = build_overlay_context(ctx, event_metadata={}, scoring_team=None)
+        assert result.get("goal_scorer_team") == "ROSEVILLE"
+
+    def test_tournament_promotes_to_title(self) -> None:
+        ctx = self._base_ctx(tournament="Presidents Cup")
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("goal_scorer_team") == "PRESIDENTS CUP"
+        assert result.get("team_level") == "ROSEVILLE/BANTAM"
+
+    def test_tournament_with_scoring_team(self) -> None:
+        ctx = self._base_ctx(tournament="Presidents Cup")
+        result = build_overlay_context(ctx, event_metadata={}, scoring_team="Bears")
+        assert result.get("goal_scorer_team") == "PRESIDENTS CUP"
+        assert result.get("team_level") == "BEARS/BANTAM"
+
+    def test_tournament_without_level(self) -> None:
+        ctx = self._base_ctx(tournament="Presidents Cup", level="")
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("goal_scorer_team") == "PRESIDENTS CUP"
+        assert result.get("team_level") == "ROSEVILLE"
+
+    def test_no_tournament_keeps_original_format(self) -> None:
+        ctx = self._base_ctx(tournament="")
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("goal_scorer_team") == "ROSEVILLE"
+        assert result.get("team_level") == "BANTAM"

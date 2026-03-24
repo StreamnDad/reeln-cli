@@ -406,6 +406,39 @@ def test_config_to_dict_default_plugins_omitted() -> None:
     assert "plugins" not in d
 
 
+def test_config_to_dict_default_branding_omitted() -> None:
+    cfg = AppConfig()
+    d = config_to_dict(cfg)
+    assert "branding" not in d
+
+
+def test_config_to_dict_branding_disabled() -> None:
+    from reeln.models.branding import BrandingConfig
+
+    cfg = AppConfig(branding=BrandingConfig(enabled=False))
+    d = config_to_dict(cfg)
+    assert "branding" in d
+    assert d["branding"]["enabled"] is False
+
+
+def test_config_to_dict_branding_custom_duration() -> None:
+    from reeln.models.branding import BrandingConfig
+
+    cfg = AppConfig(branding=BrandingConfig(duration=7.0))
+    d = config_to_dict(cfg)
+    assert "branding" in d
+    assert d["branding"]["duration"] == 7.0
+
+
+def test_config_to_dict_branding_custom_template() -> None:
+    from reeln.models.branding import BrandingConfig
+
+    cfg = AppConfig(branding=BrandingConfig(template="/my/brand.ass"))
+    d = config_to_dict(cfg)
+    assert "branding" in d
+    assert d["branding"]["template"] == "/my/brand.ass"
+
+
 # ---------------------------------------------------------------------------
 # config_to_dict full=True (for config show)
 # ---------------------------------------------------------------------------
@@ -417,6 +450,7 @@ def test_config_to_dict_full_includes_all_sections() -> None:
     d = config_to_dict(cfg, full=True)
     assert d["render_profiles"] == {}
     assert d["iterations"] == {}
+    assert d["branding"] == {"enabled": True, "template": "builtin:branding", "duration": 5.0}
     assert d["orchestration"] == {"upload_bitrate_kbps": 0, "sequential": True}
     assert d["plugins"] == {
         "enabled": [],
@@ -533,6 +567,46 @@ def test_dict_to_config_plugins_enforce_hooks_default_true() -> None:
 def test_dict_to_config_plugins_not_dict_ignored() -> None:
     cfg = dict_to_config({"plugins": "not_a_dict"})
     assert cfg.plugins.enabled == []
+
+
+def test_dict_to_config_branding_defaults() -> None:
+    cfg = dict_to_config({})
+    assert cfg.branding.enabled is True
+    assert cfg.branding.template == "builtin:branding"
+    assert cfg.branding.duration == 5.0
+
+
+def test_dict_to_config_branding_disabled() -> None:
+    d = {"branding": {"enabled": False}}
+    cfg = dict_to_config(d)
+    assert cfg.branding.enabled is False
+
+
+def test_dict_to_config_branding_custom_duration() -> None:
+    d = {"branding": {"duration": 5.0}}
+    cfg = dict_to_config(d)
+    assert cfg.branding.duration == 5.0
+
+
+def test_dict_to_config_branding_custom_template() -> None:
+    d = {"branding": {"template": "/my/brand.ass"}}
+    cfg = dict_to_config(d)
+    assert cfg.branding.template == "/my/brand.ass"
+
+
+def test_dict_to_config_branding_not_dict_ignored() -> None:
+    cfg = dict_to_config({"branding": "bad"})
+    assert cfg.branding.enabled is True
+
+
+def test_config_branding_roundtrip() -> None:
+    from reeln.models.branding import BrandingConfig
+
+    original = AppConfig(branding=BrandingConfig(enabled=False, duration=5.0))
+    d = config_to_dict(original)
+    restored = dict_to_config(d)
+    assert restored.branding.enabled is False
+    assert restored.branding.duration == 5.0
 
 
 def test_config_orchestration_plugins_roundtrip() -> None:
@@ -715,6 +789,16 @@ def test_validate_config_plugins_not_dict() -> None:
 
 def test_validate_config_plugins_valid() -> None:
     issues = validate_config({"config_version": 1, "plugins": {"enabled": ["youtube"]}})
+    assert issues == []
+
+
+def test_validate_config_branding_not_dict() -> None:
+    issues = validate_config({"config_version": 1, "branding": "bad"})
+    assert any("branding" in i for i in issues)
+
+
+def test_validate_config_branding_valid() -> None:
+    issues = validate_config({"config_version": 1, "branding": {"enabled": False}})
     assert issues == []
 
 

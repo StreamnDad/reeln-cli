@@ -12,6 +12,7 @@ from typing import Any
 
 from reeln.core.errors import ConfigError
 from reeln.core.log import get_logger
+from reeln.models.branding import BrandingConfig
 from reeln.models.config import AppConfig, PathConfig, PluginsConfig, VideoConfig
 from reeln.models.plugin import OrchestrationConfig
 from reeln.models.profile import (
@@ -146,6 +147,18 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
         },
     }
 
+    has_branding = (
+        not config.branding.enabled
+        or config.branding.template != "builtin:branding"
+        or config.branding.duration != 5.0
+    )
+    if full or has_branding:
+        d["branding"] = {
+            "enabled": config.branding.enabled,
+            "template": config.branding.template,
+            "duration": config.branding.duration,
+        }
+
     if full or config.render_profiles:
         d["render_profiles"] = {
             name: render_profile_to_dict(profile) for name, profile in config.render_profiles.items()
@@ -243,6 +256,16 @@ def dict_to_config(data: dict[str, Any]) -> AppConfig:
             enforce_hooks=bool(raw_plugins.get("enforce_hooks", True)),
         )
 
+    # Branding
+    raw_branding = data.get("branding", {})
+    branding_cfg = BrandingConfig()
+    if isinstance(raw_branding, dict):
+        branding_cfg = BrandingConfig(
+            enabled=bool(raw_branding.get("enabled", True)),
+            template=str(raw_branding.get("template", "builtin:branding")),
+            duration=float(raw_branding.get("duration", 5.0)),
+        )
+
     return AppConfig(
         config_version=int(data.get("config_version", CURRENT_CONFIG_VERSION)),
         sport=str(data.get("sport", "generic")),
@@ -250,6 +273,7 @@ def dict_to_config(data: dict[str, Any]) -> AppConfig:
         paths=_dict_to_path_config(data.get("paths", {})),
         render_profiles=profiles,
         iterations=iterations,
+        branding=branding_cfg,
         orchestration=orchestration,
         plugins=plugins_cfg,
     )
@@ -346,6 +370,10 @@ def validate_config(data: dict[str, Any]) -> list[str]:
     if orchestration is not None and not isinstance(orchestration, dict):
         issues.append("'orchestration' section must be a dict")
 
+    branding = data.get("branding")
+    if branding is not None and not isinstance(branding, dict):
+        issues.append("'branding' section must be a dict")
+
     plugins = data.get("plugins")
     if plugins is not None and not isinstance(plugins, dict):
         issues.append("'plugins' section must be a dict")
@@ -422,8 +450,10 @@ def load_config(
     base = config_to_dict(default_config())
 
     # Determine whether the user explicitly requested a specific config
-    explicit = path is not None or profile is not None or bool(
-        os.environ.get("REELN_CONFIG") or os.environ.get("REELN_PROFILE")
+    explicit = (
+        path is not None
+        or profile is not None
+        or bool(os.environ.get("REELN_CONFIG") or os.environ.get("REELN_PROFILE"))
     )
 
     file_path = resolve_config_path(path, profile)

@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from reeln.models.profile import SpeedSegment
 
 
 class CropMode(Enum):
@@ -12,6 +16,8 @@ class CropMode(Enum):
 
     PAD = "pad"
     CROP = "crop"
+    SMART = "smart"
+    SMART_PAD = "smart_pad"
 
 
 class OutputFormat(Enum):
@@ -56,6 +62,8 @@ class ShortConfig:
     crop_mode: CropMode = CropMode.PAD
     anchor_x: float = 0.5
     anchor_y: float = 0.5
+    scale: float = 1.0
+    smart: bool = False
     pad_color: str = "black"
     speed: float = 1.0
     lut: Path | None = None
@@ -66,3 +74,6 @@ class ShortConfig:
     crf: int = 18
     audio_codec: str = "aac"
     audio_bitrate: str = "128k"
+    speed_segments: tuple[SpeedSegment, ...] | None = None
+    smart_zoom_frames: int = 5
+    branding: Path | None = None

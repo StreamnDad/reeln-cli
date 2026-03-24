@@ -109,6 +109,8 @@ Named render profiles define reusable rendering parameter overrides. Add a `rend
 | `crop_mode` | string | `"pad"` or `"crop"` (short-form only) |
 | `anchor_x` | float | Crop anchor X position, 0.0–1.0 (short-form only) |
 | `anchor_y` | float | Crop anchor Y position, 0.0–1.0 (short-form only) |
+| `scale` | float | Content scale, 0.5–3.0 (default: 1.0). Values > 1.0 zoom in. |
+| `smart` | bool | Enable smart tracking via vision plugin |
 | `pad_color` | string | Pad bar color (short-form only) |
 | `codec` | string | Video codec override |
 | `preset` | string | Encoder preset override |
@@ -117,6 +119,35 @@ Named render profiles define reusable rendering parameter overrides. Add a `rend
 | `audio_bitrate` | string | Audio bitrate override |
 
 All fields are optional — `null` or omitted means "inherit from base config".
+
+#### Variable speed (speed_segments)
+
+For variable-speed rendering within a single clip, use `speed_segments` instead of the scalar `speed` field. Each segment defines a speed and a source-time boundary:
+
+```json
+{
+  "render_profiles": {
+    "slowmo-middle": {
+      "speed_segments": [
+        {"until": 5.0, "speed": 1.0},
+        {"until": 8.0, "speed": 0.5},
+        {"speed": 1.0}
+      ]
+    }
+  }
+}
+```
+
+This plays the first 5 seconds at normal speed, then 3 seconds at half speed, then the rest at normal speed. The last segment must omit `until` (it runs to the end of the clip).
+
+Rules:
+- At least 2 segments required (use scalar `speed` for uniform speed)
+- `until` values must be strictly increasing and positive
+- Speeds must be in the range 0.25–4.0
+- `speed` and `speed_segments` are mutually exclusive — set one or the other, not both
+- `speed_segments` cannot be combined with `--smart` tracking
+
+`speed_segments` is profile-only — there is no CLI flag for it. Configure it in a render profile and use `--render-profile` to apply it.
 
 Profiles are used with `--render-profile` on `render short`, `render preview`, `render apply`, `game segment`, and `game highlights`.
 
@@ -152,6 +183,37 @@ reeln render short clip.mkv --render-profile player-overlay \
 reeln render short clip.mkv --iterate --game-dir . --event <event-id>
 ```
 
+#### Smart tracking
+
+Smart tracking (`--smart` or `"smart": true` in a profile) requires a vision plugin that handles the `ON_FRAMES_EXTRACTED` hook. Without one, `--smart` falls back to static center positioning with a warning.
+
+The [reeln-plugin-openai](https://github.com/StreamnDad/reeln-plugin-openai) package provides smart zoom via OpenAI's vision API. Enable it in plugin settings:
+
+```json
+{
+  "plugins": {
+    "enabled": ["openai"],
+    "settings": {
+      "openai": {
+        "api_key": "sk-...",
+        "smart_zoom_enabled": true,
+        "smart_zoom_model": "gpt-4o"
+      }
+    }
+  }
+}
+```
+
+When smart tracking is active, the render pipeline:
+
+1. Extracts frames from the clip (`--zoom-frames` controls how many, default 5)
+2. Emits `ON_FRAMES_EXTRACTED` — the vision plugin analyzes frames and returns a zoom path
+3. Builds dynamic ffmpeg expressions that follow the action throughout the clip
+
+Smart tracking composes with both crop modes:
+- **crop + smart** — the crop window tracks the action point
+- **pad + smart** — pillarbox bars pan horizontally to center the action (vertical position stays fixed)
+
 ### Iterations section
 
 The `iterations` section maps event types to ordered lists of profile names. This is used for multi-iteration rendering where each event type gets a different sequence of render passes:
@@ -182,6 +244,28 @@ reeln game highlights --iterate
 ```
 
 Each profile in the list is applied in order, and the iteration outputs are concatenated end-to-end into a single final file. For example, a goal event with profiles `["fullspeed", "slowmo", "goal-overlay"]` produces a video that plays the clip at full speed, then slow motion, then with the goal overlay — all stitched together automatically.
+
+### Branding section
+
+The `branding` section controls the branding overlay shown at the start of rendered shorts:
+
+```json
+{
+  "branding": {
+    "enabled": true,
+    "template": "builtin:branding",
+    "duration": 5.0
+  }
+}
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Whether to show branding overlay |
+| `template` | `"builtin:branding"` | Template path — `"builtin:branding"` for the default, or a path to a custom `.ass` file |
+| `duration` | `5.0` | How long the branding is visible in seconds |
+
+The builtin branding overlay displays "reeln v{version} by https://streamn.dad" in bold white text with a black outline at the top of the video, fading in over 300ms and fading out over 800ms. To disable branding entirely, set `enabled` to `false` or use `--no-branding` on the CLI.
 
 ### Orchestration section
 
@@ -346,6 +430,47 @@ When any command is run with `--debug`, pipeline debug artifacts are written to 
 - **HTML index** (`debug/index.html`) — browsable summary linking to all debug artifacts and processed videos
 
 Debug artifacts are automatically removed by `game prune` (no `--all` flag needed). Open `debug/index.html` in a browser for a quick overview of all operations performed on a game.
+
+## Team profiles and rosters
+
+Team profiles are stored as JSON files in the config directory under `teams/{level}/{slug}.json`. When you initialize a game with `--level`, the team level and slugs are persisted in `game.json`, enabling roster-based player lookup during rendering.
+
+### Setting up rosters for player number lookup
+
+1. **Create team profiles** with `roster_path` pointing to a CSV file:
+
+```json
+{
+  "team_name": "Eagles",
+  "short_name": "EGL",
+  "level": "bantam",
+  "roster_path": "/path/to/eagles_roster.csv",
+  "colors": ["#C8102E", "#000000"]
+}
+```
+
+2. **Create the roster CSV** with `number`, `name`, and `position` columns:
+
+```text
+number,name,position
+48,John Smith,C
+24,Jane Doe,D
+2,Bob Jones,RW
+```
+
+3. **Initialize games with `--level`** to persist team profile references:
+
+```bash
+reeln game init eagles bears --level bantam --sport hockey
+```
+
+4. **Use `--player-numbers` during rendering** to look up players from the roster:
+
+```bash
+reeln render short clip.mkv --player-numbers 48,24,2 --event-type HOME_GOAL -r overlay
+```
+
+This resolves to `#48 Smith` (scorer) with assists `#24 Doe` and `#2 Jones`.
 
 ## Schema versioning
 

@@ -250,9 +250,11 @@ def _run_probe_float(cmd: list[str]) -> float | None:
 
 
 def list_codecs(ffmpeg_path: Path) -> list[str]:
-    """Return a list of encoding-capable codec names.
+    """Return a list of encoding-capable codec names and encoder names.
 
-    Parses ``ffmpeg -codecs`` output.  Returns an empty list on error.
+    Parses ``ffmpeg -codecs`` output.  Each encoding-capable line yields
+    the codec family name (e.g. ``h264``) **and** any specific encoder
+    names listed in ``(encoders: ...)``.  Returns an empty list on error.
     """
     proc = _run_probe([str(ffmpeg_path), "-codecs"])
     if proc is None:
@@ -263,13 +265,21 @@ def list_codecs(ffmpeg_path: Path) -> list[str]:
         stripped = line.strip()
         # Codec lines have 6-char flags then a space then the codec name.
         # Encoding-capable codecs have 'E' at position 1 (0-indexed).
-        # Example: "DEV.LS libx264  ..."
+        # Example: "DEV.LS h264  ... (encoders: libx264 libx264rgb h264_videotoolbox)"
         if len(stripped) < 8:
             continue
         flags = stripped[:6]
         if len(flags) >= 2 and flags[1] == "E":
-            codec_name = stripped[6:].split()[0]
+            rest = stripped[6:].strip()
+            codec_name = rest.split()[0]
             codecs.append(codec_name)
+            # Extract encoder names from "(encoders: name1 name2 ...)"
+            idx = rest.find("(encoders:")
+            if idx != -1:
+                close = rest.find(")", idx)
+                if close != -1:
+                    encoder_str = rest[idx + len("(encoders:") : close].strip()
+                    codecs.extend(encoder_str.split())
     return codecs
 
 
@@ -348,6 +358,77 @@ def build_concat_command(
 # ---------------------------------------------------------------------------
 
 
+def build_xfade_command(
+    ffmpeg_path: Path,
+    files: list[Path],
+    durations: list[float],
+    output: Path,
+    *,
+    fade_duration: float = 0.5,
+    video_codec: str = "libx264",
+    crf: int = 18,
+    audio_codec: str = "aac",
+    audio_rate: int = 48000,
+) -> list[str]:
+    """Build an ffmpeg command that concatenates files with cross-fade transitions.
+
+    Uses the ``xfade`` video filter and ``acrossfade`` audio filter to
+    create smooth fade transitions between adjacent clips.
+
+    *durations* must have the same length as *files* — each entry is the
+    duration of the corresponding input in seconds.
+    """
+    if len(files) != len(durations):
+        raise FFmpegError(
+            f"files and durations must have the same length: {len(files)} vs {len(durations)}"
+        )
+    if len(files) < 2:
+        raise FFmpegError("xfade requires at least 2 input files")
+
+    cmd: list[str] = [str(ffmpeg_path), "-y"]
+    for f in files:
+        cmd.extend(["-i", str(f)])
+
+    n = len(files)
+    fade = min(fade_duration, min(durations) / 2)
+
+    # Build xfade chain: [0:v][1:v]xfade=...=offset[xf0];[xf0][2:v]xfade=...[xf1]...
+    v_parts: list[str] = []
+    a_parts: list[str] = []
+
+    # Track the cumulative offset (accounting for fade overlap)
+    offset = durations[0] - fade
+    for i in range(1, n):
+        v_in = f"[{i - 1}:v]" if i == 1 else f"[xf{i - 2}]"
+        v_out = f"[xf{i - 1}]" if i < n - 1 else "[vout]"
+        v_parts.append(
+            f"{v_in}[{i}:v]xfade=transition=fade:duration={fade}:offset={offset:.6f}{v_out}"
+        )
+
+        a_in = f"[{i - 1}:a]" if i == 1 else f"[af{i - 2}]"
+        a_out = f"[af{i - 1}]" if i < n - 1 else "[aout]"
+        a_parts.append(
+            f"{a_in}[{i}:a]acrossfade=d={fade}:c1=tri:c2=tri{a_out}"
+        )
+
+        if i < n - 1:
+            offset += durations[i] - fade
+
+    filter_complex = ";".join(v_parts + a_parts)
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-map", "[aout]",
+        "-c:v", video_codec,
+        "-crf", str(crf),
+        "-c:a", audio_codec,
+        "-ar", str(audio_rate),
+        str(output),
+    ])
+    return cmd
+
+
 def write_concat_file(files: list[Path], output_dir: Path) -> Path:
     """Write an ffmpeg concat demuxer list to a temp file.
 
@@ -392,6 +473,33 @@ def run_ffmpeg(cmd: list[str], *, timeout: int = 600) -> subprocess.CompletedPro
     return proc
 
 
+def build_extract_frame_command(
+    ffmpeg_path: Path,
+    input_path: Path,
+    timestamp: float,
+    output_path: Path,
+) -> list[str]:
+    """Build an ffmpeg command to extract a single frame at a given timestamp.
+
+    Uses seek-then-decode for accurate frame extraction.
+    """
+    return [
+        str(ffmpeg_path),
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        f"{timestamp:.3f}",
+        "-i",
+        str(input_path),
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        str(output_path),
+    ]
+
+
 def build_short_command(ffmpeg_path: Path, plan: RenderPlan) -> list[str]:
     """Build an ffmpeg command for short-form rendering with filter chains.
 
@@ -407,6 +515,10 @@ def build_short_command(ffmpeg_path: Path, plan: RenderPlan) -> list[str]:
     ]
     if plan.filter_complex:
         cmd.extend(["-filter_complex", plan.filter_complex])
+        # When audio is embedded in filter_complex (speed_segments), add
+        # explicit stream mapping so ffmpeg picks the correct output pads.
+        if "[vfinal]" in plan.filter_complex and "[afinal]" in plan.filter_complex:
+            cmd.extend(["-map", "[vfinal]", "-map", "[afinal]"])
     if plan.audio_filter:
         cmd.extend(["-af", plan.audio_filter])
     cmd.extend(

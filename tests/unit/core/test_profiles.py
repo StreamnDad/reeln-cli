@@ -19,7 +19,7 @@ from reeln.core.profiles import (
 )
 from reeln.models.config import AppConfig
 from reeln.models.game import GameEvent
-from reeln.models.profile import IterationConfig, RenderProfile
+from reeln.models.profile import IterationConfig, RenderProfile, SpeedSegment
 from reeln.models.short import CropMode, ShortConfig
 from reeln.models.template import TemplateContext
 
@@ -163,6 +163,34 @@ class TestApplyProfileToShort:
         result = apply_profile_to_short(base, profile, rendered_subtitle=sub)
         assert result.subtitle == sub
 
+    def test_scale_override(self, tmp_path: Path) -> None:
+        base = _base_short(tmp_path)
+        profile = RenderProfile(name="zoom", scale=1.5)
+        result = apply_profile_to_short(base, profile)
+        assert result.scale == 1.5
+        assert result.width == base.width  # unchanged
+
+    def test_smart_override(self, tmp_path: Path) -> None:
+        base = _base_short(tmp_path)
+        profile = RenderProfile(name="tracked", smart=True)
+        result = apply_profile_to_short(base, profile)
+        assert result.smart is True
+
+    def test_smart_false_override(self, tmp_path: Path) -> None:
+        base = _base_short(tmp_path)
+        base_with_smart = apply_profile_to_short(base, RenderProfile(name="s", smart=True))
+        profile = RenderProfile(name="no-track", smart=False)
+        result = apply_profile_to_short(base_with_smart, profile)
+        assert result.smart is False
+
+    def test_speed_segments_override(self, tmp_path: Path) -> None:
+        base = _base_short(tmp_path)
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="var", speed_segments=segs)
+        result = apply_profile_to_short(base, profile)
+        assert result.speed_segments == segs
+        assert result.speed == 1.0  # unchanged
+
     def test_original_unchanged(self, tmp_path: Path) -> None:
         base = _base_short(tmp_path)
         profile = RenderProfile(name="fast", speed=2.0)
@@ -209,7 +237,7 @@ class TestBuildProfileFilterChain:
         profile = RenderProfile(name="overlay")
         fc, af = build_profile_filter_chain(profile, rendered_subtitle=sub)
         assert fc is not None
-        assert "ass=" in fc
+        assert "subtitles=" in fc
         assert af is None
 
     def test_all_filters(self) -> None:
@@ -221,7 +249,7 @@ class TestBuildProfileFilterChain:
         assert len(parts) == 3  # lut, speed, subtitle
         assert "lut3d" in parts[0]
         assert "setpts" in parts[1]
-        assert "ass=" in parts[2]
+        assert "subtitles=" in parts[2]
         assert af is not None
 
     def test_filter_order_lut_before_speed(self) -> None:
@@ -231,6 +259,42 @@ class TestBuildProfileFilterChain:
         lut_pos = fc.index("lut3d")
         speed_pos = fc.index("setpts")
         assert lut_pos < speed_pos
+
+    def test_speed_segments(self) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="var", speed_segments=segs)
+        fc, af = build_profile_filter_chain(profile)
+        assert fc is not None
+        assert "split=2" in fc
+        assert "asplit=2" in fc
+        assert af is None
+
+    def test_speed_segments_with_lut(self) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="var", speed_segments=segs, lut="warm.cube")
+        fc, af = build_profile_filter_chain(profile)
+        assert fc is not None
+        lut_pos = fc.index("lut3d")
+        split_pos = fc.index("split=2")
+        assert lut_pos < split_pos
+        assert af is None
+
+    def test_speed_segments_with_subtitle(self) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        sub = Path("/tmp/overlay.ass")
+        profile = RenderProfile(name="var", speed_segments=segs)
+        fc, af = build_profile_filter_chain(profile, rendered_subtitle=sub)
+        assert fc is not None
+        concat_pos = fc.index("concat=n=2:v=1:a=0")
+        sub_pos = fc.index("subtitles=")
+        assert sub_pos > concat_pos
+        assert af is None
+
+    def test_speed_and_speed_segments_mutual_exclusion(self) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="bad", speed=0.5, speed_segments=segs)
+        with pytest.raises(RenderError, match="mutually exclusive"):
+            build_profile_filter_chain(profile)
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +364,7 @@ class TestPlanFullFrame:
             rendered_subtitle=sub,
         )
         assert plan.filter_complex is not None
-        assert "ass=" in plan.filter_complex
+        assert "subtitles=" in plan.filter_complex
 
     def test_no_width_height_in_plan(self, tmp_path: Path) -> None:
         profile = RenderProfile(name="full", width=1080, height=1920)
@@ -320,6 +384,22 @@ class TestPlanFullFrame:
         profile = RenderProfile(name="bad", speed=0.1)
         config = AppConfig()
         with pytest.raises(RenderError, match="Speed must be"):
+            plan_full_frame(tmp_path / "clip.mkv", tmp_path / "out.mp4", profile, config)
+
+    def test_speed_segments(self, tmp_path: Path) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="var", speed_segments=segs)
+        config = AppConfig()
+        plan = plan_full_frame(tmp_path / "clip.mkv", tmp_path / "out.mp4", profile, config)
+        assert plan.filter_complex is not None
+        assert "split=2" in plan.filter_complex
+        assert plan.audio_filter is None
+
+    def test_speed_and_speed_segments_mutual_exclusion(self, tmp_path: Path) -> None:
+        segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+        profile = RenderProfile(name="bad", speed=0.5, speed_segments=segs)
+        config = AppConfig()
+        with pytest.raises(RenderError, match="mutually exclusive"):
             plan_full_frame(tmp_path / "clip.mkv", tmp_path / "out.mp4", profile, config)
 
 

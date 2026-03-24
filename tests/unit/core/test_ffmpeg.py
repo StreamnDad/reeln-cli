@@ -12,8 +12,10 @@ from reeln.core.errors import FFmpegError
 from reeln.core.ffmpeg import (
     _VIDEO_EXTENSIONS,
     build_concat_command,
+    build_extract_frame_command,
     build_render_command,
     build_short_command,
+    build_xfade_command,
     check_version,
     derive_ffprobe,
     discover_ffmpeg,
@@ -301,9 +303,8 @@ Codecs:
  D..... = Decoding supported
  .E.... = Encoding supported
  -------
- D.V.LS h264                 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10
- DEV.LS libx264              H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
- DEV.LS libx265              H.265 / HEVC (codec hevc)
+ DEV.LS h264                 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (encoders: libx264 libx264rgb h264_videotoolbox)
+ DEV.L. hevc                 H.265 / HEVC (High Efficiency Video Coding) (encoders: libx265 hevc_videotoolbox)
  DEA.LS aac                  AAC (Advanced Audio Coding)
  D.A.LS mp3                  MP3 (MPEG audio layer 3)
 """
@@ -313,10 +314,13 @@ def test_list_codecs_success() -> None:
     with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc(_CODECS_OUTPUT)):
         result = list_codecs(Path("/usr/bin/ffmpeg"))
     assert "libx264" in result
+    assert "libx264rgb" in result
+    assert "h264_videotoolbox" in result
     assert "libx265" in result
+    assert "hevc_videotoolbox" in result
     assert "aac" in result
-    # h264 has 'D' but not 'E' at position 1 — should NOT be included
-    assert "h264" not in result
+    # h264 is the codec family — included because it has 'E' flag
+    assert "h264" in result
     # mp3 is decode-only — should NOT be included
     assert "mp3" not in result
 
@@ -337,6 +341,30 @@ def test_list_codecs_empty_output() -> None:
     with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc("")):
         result = list_codecs(Path("/usr/bin/ffmpeg"))
     assert result == []
+
+
+def test_list_codecs_without_encoders_section() -> None:
+    """Codec lines without (encoders: ...) still return the codec name."""
+    output = """\
+Codecs:
+ -------
+ DEA.LS aac                  AAC (Advanced Audio Coding)
+"""
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc(output)):
+        result = list_codecs(Path("/usr/bin/ffmpeg"))
+    assert result == ["aac"]
+
+
+def test_list_codecs_malformed_encoders_no_close_paren() -> None:
+    """Malformed line with (encoders: but no closing ) still returns the codec name."""
+    output = """\
+Codecs:
+ -------
+ DEV.LS h264                 H.264 (encoders: libx264
+"""
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc(output)):
+        result = list_codecs(Path("/usr/bin/ffmpeg"))
+    assert result == ["h264"]
 
 
 _HWACCELS_OUTPUT = """\
@@ -443,6 +471,62 @@ def test_build_concat_command_reencode(tmp_path: Path) -> None:
         "48000",
         str(output),
     ]
+
+
+def test_build_xfade_command_two_files(tmp_path: Path) -> None:
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    output = tmp_path / "out.mp4"
+    cmd = build_xfade_command(ffmpeg, [a, b], [10.0, 8.0], output)
+    assert str(ffmpeg) in cmd
+    assert "-filter_complex" in cmd
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "xfade=transition=fade" in fc
+    assert "acrossfade" in fc
+    assert "[vout]" in fc
+    assert "[aout]" in fc
+    assert "-map" in cmd
+
+
+def test_build_xfade_command_three_files(tmp_path: Path) -> None:
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    files = [tmp_path / f"{i}.mp4" for i in range(3)]
+    output = tmp_path / "out.mp4"
+    cmd = build_xfade_command(ffmpeg, files, [10.0, 8.0, 6.0], output)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # Should have 2 xfade and 2 acrossfade stages
+    assert fc.count("xfade=") == 2
+    assert fc.count("acrossfade=") == 2
+    # Intermediate labels
+    assert "[xf0]" in fc
+    assert "[af0]" in fc
+
+
+def test_build_xfade_command_mismatched_lengths(tmp_path: Path) -> None:
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    a = tmp_path / "a.mp4"
+    with pytest.raises(FFmpegError, match="same length"):
+        build_xfade_command(ffmpeg, [a], [10.0, 8.0], tmp_path / "out.mp4")
+
+
+def test_build_xfade_command_too_few_files(tmp_path: Path) -> None:
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    a = tmp_path / "a.mp4"
+    with pytest.raises(FFmpegError, match="at least 2"):
+        build_xfade_command(ffmpeg, [a], [10.0], tmp_path / "out.mp4")
+
+
+def test_build_xfade_command_clamps_fade_duration(tmp_path: Path) -> None:
+    """Fade duration is clamped to half the shortest clip."""
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    a = tmp_path / "a.mp4"
+    b = tmp_path / "b.mp4"
+    output = tmp_path / "out.mp4"
+    cmd = build_xfade_command(ffmpeg, [a, b], [10.0, 0.6], output, fade_duration=5.0)
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    # fade should be clamped to 0.3 (half of 0.6)
+    assert "duration=0.3:" in fc
 
 
 def test_build_render_command_basic(tmp_path: Path) -> None:
@@ -648,6 +732,33 @@ def test_build_short_command_no_audio_filter(tmp_path: Path) -> None:
     assert "-filter_complex" in cmd
 
 
+def test_build_short_command_speed_segments_maps_outputs(tmp_path: Path) -> None:
+    """When filter_complex contains [vfinal] and [afinal], -map flags are added."""
+    fc = (
+        "[0:v]split=2[v0][v1];"
+        "[v0]trim=0:5,setpts=PTS-STARTPTS[sv0];"
+        "[v1]trim=5,setpts=PTS-STARTPTS[sv1];"
+        "[sv0][sv1]concat=n=2:v=1:a=0[_vout];"
+        "[_vout]scale=756:-2:flags=lanczos[vfinal];"
+        "[0:a]asplit=2[a0][a1];"
+        "[a0]atrim=0:5,asetpts=PTS-STARTPTS[sa0];"
+        "[a1]atrim=5,asetpts=PTS-STARTPTS[sa1];"
+        "[sa0][sa1]concat=n=2:v=0:a=1[afinal]"
+    )
+    plan = RenderPlan(
+        inputs=[tmp_path / "clip.mkv"],
+        output=tmp_path / "out.mp4",
+        filter_complex=fc,
+    )
+    cmd = build_short_command(Path("/usr/bin/ffmpeg"), plan)
+    assert "-map" in cmd
+    map_indices = [i for i, v in enumerate(cmd) if v == "-map"]
+    assert len(map_indices) == 2
+    assert cmd[map_indices[0] + 1] == "[vfinal]"
+    assert cmd[map_indices[1] + 1] == "[afinal]"
+    assert "-af" not in cmd
+
+
 def test_build_short_command_no_filters(tmp_path: Path) -> None:
     plan = RenderPlan(
         inputs=[tmp_path / "clip.mkv"],
@@ -695,3 +806,43 @@ def test_build_short_command_custom_encoding(tmp_path: Path) -> None:
     assert cmd[idx + 1] == "opus"
     idx = cmd.index("-b:a")
     assert cmd[idx + 1] == "192k"
+
+
+# ---------------------------------------------------------------------------
+# build_extract_frame_command — golden assertions
+# ---------------------------------------------------------------------------
+
+
+def test_build_extract_frame_command_basic(tmp_path: Path) -> None:
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    input_path = tmp_path / "clip.mkv"
+    output_path = tmp_path / "frame_0000.png"
+    cmd = build_extract_frame_command(ffmpeg, input_path, 5.0, output_path)
+    assert cmd == [
+        "/usr/bin/ffmpeg",
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        "5.000",
+        "-i",
+        str(input_path),
+        "-frames:v",
+        "1",
+        "-update",
+        "1",
+        str(output_path),
+    ]
+
+
+def test_build_extract_frame_command_zero_timestamp(tmp_path: Path) -> None:
+    cmd = build_extract_frame_command(Path("/usr/bin/ffmpeg"), tmp_path / "clip.mkv", 0.0, tmp_path / "f.png")
+    assert "-ss" in cmd
+    idx = cmd.index("-ss")
+    assert cmd[idx + 1] == "0.000"
+
+
+def test_build_extract_frame_command_fractional_timestamp(tmp_path: Path) -> None:
+    cmd = build_extract_frame_command(Path("/usr/bin/ffmpeg"), tmp_path / "clip.mkv", 3.141, tmp_path / "f.png")
+    idx = cmd.index("-ss")
+    assert cmd[idx + 1] == "3.141"

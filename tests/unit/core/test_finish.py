@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from reeln.core.errors import MediaError
-from reeln.core.finish import _build_summary, finish_game
+from reeln.core.finish import _build_summary, finish_game, relocate_outputs
 from reeln.models.game import (
     GameEvent,
     GameInfo,
@@ -217,3 +217,138 @@ def test_finish_game_dry_run_no_hook(tmp_path: Path) -> None:
     finish_game(tmp_path, dry_run=True)
 
     assert len(emitted) == 0
+
+
+# ---------------------------------------------------------------------------
+# relocate_outputs
+# ---------------------------------------------------------------------------
+
+
+def test_relocate_outputs_moves_files(tmp_path: Path) -> None:
+    """Segment and highlights outputs are moved into game_dir/outputs/."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    # Create output files in game_dir.parent (tmp_path)
+    seg = tmp_path / "period-1_2026-03-15.mkv"
+    seg.write_bytes(b"segment")
+    hl = tmp_path / "a_vs_b_2026-03-15.mkv"
+    hl.write_bytes(b"highlights")
+
+    state = _make_state(
+        segment_outputs=["period-1_2026-03-15.mkv"],
+        highlights_output="a_vs_b_2026-03-15.mkv",
+    )
+
+    relocated, messages = relocate_outputs(game_dir, state)
+
+    assert len(relocated) == 2
+    assert (game_dir / "outputs" / "period-1_2026-03-15.mkv").is_file()
+    assert (game_dir / "outputs" / "a_vs_b_2026-03-15.mkv").is_file()
+    assert not seg.exists()
+    assert not hl.exists()
+    assert any("Relocated" in m for m in messages)
+
+
+def test_relocate_outputs_dry_run(tmp_path: Path) -> None:
+    """Dry run reports but does not move files."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    seg = tmp_path / "period-1_2026-03-15.mkv"
+    seg.write_bytes(b"segment")
+
+    state = _make_state(segment_outputs=["period-1_2026-03-15.mkv"])
+
+    relocated, messages = relocate_outputs(game_dir, state, dry_run=True)
+
+    assert len(relocated) == 1
+    assert seg.exists()  # not moved
+    assert not (game_dir / "outputs").exists()
+    assert any("Would relocate" in m for m in messages)
+
+
+def test_relocate_outputs_missing_files(tmp_path: Path) -> None:
+    """Missing output files are skipped gracefully."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+
+    state = _make_state(
+        segment_outputs=["period-1_2026-03-15.mkv"],
+        highlights_output="a_vs_b_2026-03-15.mkv",
+    )
+
+    relocated, messages = relocate_outputs(game_dir, state)
+
+    assert relocated == []
+    assert messages == []
+
+
+def test_relocate_outputs_no_outputs(tmp_path: Path) -> None:
+    """No outputs in state means nothing to relocate."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+
+    state = _make_state()
+
+    relocated, messages = relocate_outputs(game_dir, state)
+
+    assert relocated == []
+    assert messages == []
+
+
+def test_relocate_outputs_partial_missing(tmp_path: Path) -> None:
+    """Some files exist, some don't — only existing ones are moved."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    seg = tmp_path / "period-1_2026-03-15.mkv"
+    seg.write_bytes(b"segment")
+    # period-2 doesn't exist
+
+    state = _make_state(
+        segment_outputs=["period-1_2026-03-15.mkv", "period-2_2026-03-15.mkv"],
+    )
+
+    relocated, messages = relocate_outputs(game_dir, state)
+
+    assert len(relocated) == 1
+    assert (game_dir / "outputs" / "period-1_2026-03-15.mkv").is_file()
+    assert len(messages) == 1
+
+
+# ---------------------------------------------------------------------------
+# finish_game — relocate integration
+# ---------------------------------------------------------------------------
+
+
+def test_finish_game_relocates_outputs(tmp_path: Path) -> None:
+    """finish_game calls relocate_outputs and includes messages."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    seg = tmp_path / "period-1_2026-03-15.mkv"
+    seg.write_bytes(b"segment")
+
+    state = _make_state(segment_outputs=["period-1_2026-03-15.mkv"])
+    _write_state(game_dir, state)
+
+    result, messages = finish_game(game_dir)
+
+    assert result.finished is True
+    assert (game_dir / "outputs" / "period-1_2026-03-15.mkv").is_file()
+    assert not seg.exists()
+    assert any("Relocated" in m for m in messages)
+
+
+def test_finish_game_dry_run_no_relocate(tmp_path: Path) -> None:
+    """Dry run does not relocate outputs."""
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    seg = tmp_path / "period-1_2026-03-15.mkv"
+    seg.write_bytes(b"segment")
+
+    state = _make_state(segment_outputs=["period-1_2026-03-15.mkv"])
+    _write_state(game_dir, state)
+
+    result, messages = finish_game(game_dir, dry_run=True)
+
+    assert result.finished is True
+    assert seg.exists()  # not moved
+    assert not any("Relocated" in m for m in messages)

@@ -378,6 +378,47 @@ def test_prune_game_no_debug_dir(tmp_path: Path) -> None:
     assert len(result.removed_paths) == 0
 
 
+def test_prune_game_removes_outputs_contents(tmp_path: Path) -> None:
+    """Prune removes files inside the outputs/ directory."""
+    state = _make_state(
+        finished=True,
+        finished_at="2026-02-26T14:00:00+00:00",
+        segment_outputs=["period-1_2026-02-26.mkv"],
+        highlights_output="roseville_vs_mahtomedi_2026-02-26.mkv",
+    )
+    _write_state(tmp_path, state)
+
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "period-1_2026-02-26.mkv").write_bytes(b"x" * 200)
+    (outputs / "roseville_vs_mahtomedi_2026-02-26.mkv").write_bytes(b"x" * 300)
+
+    result, _messages = prune_game(tmp_path)
+
+    assert not (outputs / "period-1_2026-02-26.mkv").exists()
+    assert not (outputs / "roseville_vs_mahtomedi_2026-02-26.mkv").exists()
+    assert len(result.removed_paths) == 2
+    assert result.bytes_freed == 500
+    # Empty outputs dir should be cleaned up
+    assert not outputs.exists()
+
+
+def test_prune_game_outputs_dry_run(tmp_path: Path) -> None:
+    """Dry run reports outputs/ files but does not remove them."""
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00")
+    _write_state(tmp_path, state)
+
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    (outputs / "period-1_2026-02-26.mkv").write_bytes(b"x" * 200)
+
+    result, messages = prune_game(tmp_path, dry_run=True)
+
+    assert (outputs / "period-1_2026-02-26.mkv").exists()
+    assert len(result.removed_paths) == 1
+    assert any("Would remove" in m for m in messages)
+
+
 def test_prune_game_ignores_non_video_non_temp(tmp_path: Path) -> None:
     """Non-video, non-temp files should be left alone."""
     state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00")

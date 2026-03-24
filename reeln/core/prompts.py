@@ -230,6 +230,20 @@ def prompt_thumbnail(preset: str | None = None) -> str:
     return answer
 
 
+def prompt_tournament(preset: str | None = None) -> str:
+    """Prompt for a tournament name, or return *preset*.
+
+    Tournament is optional — an empty answer is accepted (returns ``""``).
+    """
+    if preset is not None:
+        return preset
+    questionary = _require_questionary()
+    answer: str | None = questionary.text("Tournament name (optional):").ask()
+    if answer is None:
+        return ""
+    return answer
+
+
 def prompt_period_length(preset: int | None = None) -> int:
     """Prompt for the period/segment length in minutes, or return *preset*.
 
@@ -264,9 +278,11 @@ def collect_game_info_interactive(
     game_date: str | None = None,
     venue: str | None = None,
     game_time: str | None = None,
+    level: str | None = None,
     period_length: int | None = None,
     description: str | None = None,
     thumbnail: str | None = None,
+    tournament: str | None = None,
 ) -> dict[str, Any]:
     """Collect all game info fields, prompting only for missing values.
 
@@ -288,7 +304,7 @@ def collect_game_info_interactive(
     away_profile: TeamProfile | None = None
 
     if home is None or away is None:
-        level = prompt_level()
+        level = prompt_level(preset=level)
         if home is None:
             home_profile = prompt_team(level, "home")
             result["home"] = home_profile.team_name
@@ -312,5 +328,6 @@ def collect_game_info_interactive(
     result["period_length"] = prompt_period_length(preset=period_length)
     result["description"] = prompt_description(preset=description)
     result["thumbnail"] = prompt_thumbnail(preset=thumbnail)
+    result["tournament"] = prompt_tournament(preset=tournament)
 
     return result

@@ -88,9 +88,19 @@ def main(
         envvar="REELN_LOG_LEVEL",
         help="Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL.",
     ),
+    no_enforce_hooks: bool = typer.Option(
+        False,
+        "--no-enforce-hooks",
+        help="Disable registry-based hook enforcement for plugins.",
+    ),
 ) -> None:
     """Platform-agnostic CLI toolkit for livestreamers."""
     import logging
+
+    if no_enforce_hooks:
+        from reeln.plugins.loader import set_enforce_hooks_override
+
+        set_enforce_hooks_override(disable=True)
 
     numeric_level = getattr(logging, log_level.upper(), None)
     if not isinstance(numeric_level, int):
@@ -104,10 +114,21 @@ def doctor(
     profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
     config: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
-    """Run health checks: ffmpeg, config, permissions."""
+    """Run health checks: ffmpeg, config, permissions, plugins."""
+    from reeln.core.config import load_config
     from reeln.core.doctor import doctor_exit_code, format_results, run_doctor
+    from reeln.models.doctor import DoctorCheck
+    from reeln.plugins.loader import activate_plugins, collect_doctor_checks
 
-    results = run_doctor(config_path=config, profile=profile)
+    extra: list[DoctorCheck] = []
+    try:
+        cfg = load_config(path=config, profile=profile)
+        loaded = activate_plugins(cfg.plugins)
+        extra = collect_doctor_checks(loaded)
+    except Exception:
+        pass  # config/plugin errors are reported by run_doctor's own checks
+
+    results = run_doctor(config_path=config, profile=profile, extra_checks=extra)
     lines = format_results(results)
     for line in lines:
         typer.echo(line)

@@ -19,9 +19,11 @@ from reeln.plugins.loader import (
     _parse_allowed_hooks,
     _register_plugin_hooks,
     activate_plugins,
+    collect_doctor_checks,
     discover_plugins,
     load_enabled_plugins,
     load_plugin,
+    set_enforce_hooks_override,
 )
 from reeln.plugins.registry import HookRegistry, get_registry, reset_registry
 
@@ -280,10 +282,7 @@ def test_load_enabled_plugins_not_installed_logs_debug(caplog: pytest.LogCapture
 
     assert "missing" not in result
     # Should appear in debug log, not warning
-    assert any(
-        "not installed" in r.message and r.levelno == logging.DEBUG
-        for r in caplog.records
-    )
+    assert any("not installed" in r.message and r.levelno == logging.DEBUG for r in caplog.records)
 
 
 def test_load_enabled_plugins_with_settings() -> None:
@@ -489,9 +488,7 @@ def test_register_plugin_hooks_with_allowed_hooks_blocks_undeclared() -> None:
     """Auto-discovered hooks not in allowed set are blocked."""
     registry = HookRegistry()
     plugin = _AutoDiscoverPlugin()
-    _register_plugin_hooks(
-        "auto", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT}
-    )
+    _register_plugin_hooks("auto", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT})
 
     # ON_GAME_INIT is allowed
     assert registry.has_handlers(Hook.ON_GAME_INIT)
@@ -503,9 +500,7 @@ def test_register_plugin_hooks_with_allowed_hooks_explicit_register() -> None:
     """Explicit register() with allowed_hooks wraps registry in FilteredRegistry."""
     registry = HookRegistry()
     plugin = _ExplicitRegisterPlugin()
-    _register_plugin_hooks(
-        "explicit", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT}
-    )
+    _register_plugin_hooks("explicit", plugin, registry, allowed_hooks={Hook.ON_GAME_INIT})
 
     assert registry.has_handlers(Hook.ON_GAME_INIT)
 
@@ -522,13 +517,9 @@ def test_activate_plugins_enforce_hooks_disabled() -> None:
 
     with (
         patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
-        patch(
-            "reeln.plugins.loader._fetch_registry_capabilities"
-        ) as mock_fetch,
+        patch("reeln.plugins.loader._fetch_registry_capabilities") as mock_fetch,
     ):
-        result = activate_plugins(
-            PluginsConfig(enabled=["auto"], enforce_hooks=False)
-        )
+        result = activate_plugins(PluginsConfig(enabled=["auto"], enforce_hooks=False))
 
     # Registry should NOT have been fetched
     mock_fetch.assert_not_called()
@@ -541,9 +532,7 @@ def test_activate_plugins_enforce_hooks_default_true() -> None:
     ep = _make_entry_point("test", _NoConfigPlugin)
     with (
         patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
-        patch(
-            "reeln.plugins.loader._fetch_registry_capabilities", return_value={}
-        ) as mock_fetch,
+        patch("reeln.plugins.loader._fetch_registry_capabilities", return_value={}) as mock_fetch,
     ):
         activate_plugins(PluginsConfig(enabled=["test"]))
 
@@ -563,3 +552,157 @@ def test_activate_plugins_idempotent() -> None:
     handlers = registry._handlers.get(Hook.ON_GAME_INIT, [])
     assert len(handlers) == 1
     reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# collect_doctor_checks
+# ---------------------------------------------------------------------------
+
+
+def test_collect_doctor_checks_from_plugin() -> None:
+    """Collects DoctorCheck instances from plugins that expose doctor_checks()."""
+    from reeln.models.doctor import CheckResult, CheckStatus, DoctorCheck
+
+    class MyCheck:
+        name = "my_check"
+
+        def run(self) -> list[CheckResult]:
+            return [CheckResult(name="my_check", status=CheckStatus.PASS, message="ok")]
+
+    class PluginWithDoctor:
+        name = "test-plugin"
+
+        def doctor_checks(self) -> list[DoctorCheck]:
+            return [MyCheck()]
+
+    loaded = {"test-plugin": PluginWithDoctor()}
+    checks = collect_doctor_checks(loaded)
+
+    assert len(checks) == 1
+    results = checks[0].run()
+    assert len(results) == 1
+    assert results[0].status == CheckStatus.PASS
+
+
+def test_collect_doctor_checks_skips_plugins_without() -> None:
+    """Plugins without doctor_checks() are silently skipped."""
+
+    class PlainPlugin:
+        name = "plain"
+
+    loaded = {"plain": PlainPlugin()}
+    checks = collect_doctor_checks(loaded)
+
+    assert checks == []
+
+
+def test_collect_doctor_checks_handles_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """Failures in doctor_checks() are logged and skipped."""
+
+    class BadPlugin:
+        name = "bad"
+
+        def doctor_checks(self) -> list[object]:
+            raise RuntimeError("boom")
+
+    loaded = {"bad": BadPlugin()}
+    with caplog.at_level(logging.WARNING):
+        checks = collect_doctor_checks(loaded)
+
+    assert checks == []
+    assert "bad" in caplog.text
+    assert "doctor_checks()" in caplog.text
+
+
+def test_collect_doctor_checks_multiple_plugins() -> None:
+    """Collects checks from multiple plugins."""
+    from reeln.models.doctor import CheckResult, CheckStatus
+
+    class CheckA:
+        name = "check_a"
+
+        def run(self) -> list[CheckResult]:
+            return [CheckResult(name="check_a", status=CheckStatus.PASS, message="a ok")]
+
+    class CheckB:
+        name = "check_b"
+
+        def run(self) -> list[CheckResult]:
+            return [CheckResult(name="check_b", status=CheckStatus.WARN, message="b warn")]
+
+    class PluginA:
+        name = "plugin-a"
+
+        def doctor_checks(self) -> list[object]:
+            return [CheckA()]
+
+    class PluginB:
+        name = "plugin-b"
+
+        def doctor_checks(self) -> list[object]:
+            return [CheckB()]
+
+    loaded = {"plugin-a": PluginA(), "plugin-b": PluginB()}
+    checks = collect_doctor_checks(loaded)
+
+    assert len(checks) == 2
+
+
+def test_collect_doctor_checks_empty() -> None:
+    """Empty loaded plugins returns empty list."""
+    assert collect_doctor_checks({}) == []
+
+
+# ---------------------------------------------------------------------------
+# set_enforce_hooks_override (CLI --no-enforce-hooks)
+# ---------------------------------------------------------------------------
+
+
+def test_set_enforce_hooks_override_disables_enforcement() -> None:
+    """CLI override disables hook enforcement even when config says True."""
+    ep = _make_entry_point("auto", _AutoDiscoverPlugin)
+
+    set_enforce_hooks_override(disable=True)
+    try:
+        with (
+            patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+            patch("reeln.plugins.loader._fetch_registry_capabilities") as mock_fetch,
+        ):
+            result = activate_plugins(PluginsConfig(enabled=["auto"], enforce_hooks=True))
+
+        # Registry fetch should NOT have been called despite enforce_hooks=True
+        mock_fetch.assert_not_called()
+        assert "auto" in result
+    finally:
+        set_enforce_hooks_override(disable=False)
+        reset_registry()
+
+
+def test_set_enforce_hooks_override_reset_restores_enforcement() -> None:
+    """Re-enabling enforcement restores the default behavior."""
+    ep = _make_entry_point("test", _NoConfigPlugin)
+
+    set_enforce_hooks_override(disable=True)
+    set_enforce_hooks_override(disable=False)
+
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch("reeln.plugins.loader._fetch_registry_capabilities", return_value={}) as mock_fetch,
+    ):
+        activate_plugins(PluginsConfig(enabled=["test"], enforce_hooks=True))
+
+    mock_fetch.assert_called_once()
+    reset_registry()
+
+
+def test_detect_capabilities_includes_doctor() -> None:
+    """Plugins with doctor_checks() are detected as having the doctor capability."""
+
+    class PluginWithDoctor:
+        name = "test"
+
+        def doctor_checks(self) -> list[object]:
+            return []
+
+    caps = _detect_capabilities(PluginWithDoctor())
+    assert "doctor" in caps

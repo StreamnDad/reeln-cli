@@ -9,6 +9,7 @@ from typing import Any
 from reeln.core.errors import PluginError
 from reeln.core.log import get_logger
 from reeln.models.config import PluginsConfig
+from reeln.models.doctor import DoctorCheck
 from reeln.models.plugin import PluginInfo
 from reeln.plugins.hooks import Hook
 from reeln.plugins.registry import FilteredRegistry, HookRegistry, get_registry
@@ -17,11 +18,26 @@ log: logging.Logger = get_logger(__name__)
 
 _ENTRY_POINT_GROUP: str = "reeln.plugins"
 
+# CLI-level override: when True, disables hook enforcement regardless of config.
+_cli_no_enforce_hooks: bool = False
+
+
+def set_enforce_hooks_override(*, disable: bool) -> None:
+    """Set a CLI-level override to disable hook enforcement.
+
+    Called by the top-level ``--no-enforce-hooks`` flag so that all
+    ``activate_plugins`` calls in the process skip enforcement.
+    """
+    global _cli_no_enforce_hooks
+    _cli_no_enforce_hooks = disable
+
+
 _CAPABILITY_CHECKS: list[tuple[str, str]] = [
     ("generator", "generate"),
     ("enricher", "enrich"),
     ("uploader", "upload"),
     ("notifier", "notify"),
+    ("doctor", "doctor_checks"),
 ]
 
 
@@ -235,7 +251,8 @@ def activate_plugins(plugins_config: PluginsConfig) -> dict[str, object]:
         settings=plugins_config.settings,
     )
 
-    if plugins_config.enforce_hooks:
+    enforce = plugins_config.enforce_hooks and not _cli_no_enforce_hooks
+    if enforce:
         caps = _fetch_registry_capabilities(plugins_config.registry_url)
     else:
         caps = {}
@@ -246,3 +263,27 @@ def activate_plugins(plugins_config: PluginsConfig) -> dict[str, object]:
         _register_plugin_hooks(name, plugin, registry, allowed_hooks=allowed)
 
     return loaded
+
+
+def collect_doctor_checks(loaded_plugins: dict[str, object]) -> list[DoctorCheck]:
+    """Collect ``DoctorCheck`` instances from loaded plugins.
+
+    Calls ``doctor_checks()`` on each plugin that exposes it.  Each call
+    should return a list of ``DoctorCheck`` objects.  Failures are logged
+    and skipped.
+    """
+    checks: list[DoctorCheck] = []
+    for name, plugin in loaded_plugins.items():
+        fn = getattr(plugin, "doctor_checks", None)
+        if not callable(fn):
+            continue
+        try:
+            plugin_checks = fn()
+            checks.extend(plugin_checks)
+        except Exception:
+            log.warning(
+                "Plugin %s doctor_checks() failed, skipping",
+                name,
+                exc_info=True,
+            )
+    return checks
