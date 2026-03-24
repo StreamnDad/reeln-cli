@@ -110,6 +110,36 @@ def create_game_directory(base_dir: Path, game_info: GameInfo) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Unfinished-game detection
+# ---------------------------------------------------------------------------
+
+
+def find_unfinished_games(base_dir: Path) -> list[Path]:
+    """Scan *base_dir* subdirectories for unfinished games.
+
+    Returns a list of game directory paths that contain a ``game.json``
+    with ``finished`` set to ``False``.
+    """
+    if not base_dir.is_dir():
+        return []
+
+    unfinished: list[Path] = []
+    for entry in sorted(base_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        state_file = entry / _GAME_STATE_FILE
+        if not state_file.is_file():
+            continue
+        try:
+            raw = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not raw.get("finished", False):
+            unfinished.append(entry)
+    return unfinished
+
+
+# ---------------------------------------------------------------------------
 # Init orchestrator
 # ---------------------------------------------------------------------------
 
@@ -132,6 +162,12 @@ def init_game(
 
     In dry-run mode, no files or directories are created.
     """
+    # Block if unfinished games exist
+    unfinished = find_unfinished_games(base_dir)
+    if unfinished:
+        names = ", ".join(d.name for d in unfinished)
+        raise MediaError(f"Unfinished game(s) found: {names}. Run 'reeln game finish' before starting a new game.")
+
     # Validate sport early
     alias = get_sport(game_info.sport)
 
@@ -181,6 +217,8 @@ def init_game(
         state = load_game_state(game_dir)
         state.livestreams = dict(livestreams)
         save_game_state(state, game_dir)
+        for platform, url in livestreams.items():
+            messages.append(f"Livestream ({platform}): {url}")
 
     messages.append(f"Created {_GAME_STATE_FILE}")
     log.info("Game initialized: %s", game_dir)
@@ -400,7 +438,8 @@ def process_segment(
     extensions = {f.suffix.lower() for f in videos}
     copy = len(extensions) <= 1
 
-    output_name = f"{alias}_{state.game_info.date}.mkv"
+    out_ext = next(iter(extensions)) if len(extensions) == 1 else ".mkv"
+    output_name = f"{alias}_{state.game_info.date}{out_ext}"
     output = game_dir.parent / output_name
 
     messages: list[str] = []
@@ -487,6 +526,8 @@ def process_segment(
     state.events.extend(new_events)
     if segment_number not in state.segments_processed:
         state.segments_processed.append(segment_number)
+    if output.name not in state.segment_outputs:
+        state.segment_outputs.append(output.name)
     save_game_state(state, game_dir)
 
     get_registry().emit(
@@ -548,15 +589,19 @@ def merge_game_highlights(
     sport = info.sport
     alias_info = get_sport(sport)
 
-    # Find segment highlight files in order
+    # Find segment highlight files in order (any video extension)
+    from reeln.core.ffmpeg import _VIDEO_EXTENSIONS
+
     segment_files: list[Path] = []
     segments = make_segments(sport)
     for seg in segments:
         seg_alias = segment_dir_name(sport, seg.number)
-        pattern = f"{seg_alias}_{info.date}.mkv"
-        candidate = game_dir.parent / pattern
-        if candidate.is_file():
-            segment_files.append(candidate)
+        prefix = f"{seg_alias}_{info.date}"
+        for ext in sorted(_VIDEO_EXTENSIONS):
+            candidate = game_dir.parent / f"{prefix}{ext}"
+            if candidate.is_file():
+                segment_files.append(candidate)
+                break
 
     if not segment_files:
         raise MediaError(f"No segment highlight files found in {game_dir.parent}. Run 'reeln game segment' first.")
@@ -565,7 +610,8 @@ def merge_game_highlights(
     extensions = {f.suffix.lower() for f in segment_files}
     copy = len(extensions) <= 1
 
-    output_name = f"{info.home_team}_vs_{info.away_team}_{info.date}.mkv"
+    out_ext = next(iter(extensions)) if len(extensions) == 1 else ".mkv"
+    output_name = f"{info.home_team}_vs_{info.away_team}_{info.date}{out_ext}"
     output = game_dir.parent / output_name
 
     messages: list[str] = []
@@ -617,6 +663,7 @@ def merge_game_highlights(
 
     # Update game state
     state.highlighted = True
+    state.highlights_output = output.name
     save_game_state(state, game_dir)
 
     from reeln.plugins.hooks import Hook, HookContext

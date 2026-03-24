@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from reeln.models.team import (
+    RosterEntry,
     TeamProfile,
     dict_to_team_profile,
     team_profile_to_dict,
@@ -164,3 +165,21 @@ def test_team_profile_round_trip() -> None:
 def test_team_profile_round_trip_defaults() -> None:
     tp = TeamProfile(team_name="X", short_name="X", level="jv")
     assert dict_to_team_profile(team_profile_to_dict(tp)) == tp
+
+
+# ---------------------------------------------------------------------------
+# RosterEntry
+# ---------------------------------------------------------------------------
+
+
+def test_roster_entry_fields() -> None:
+    entry = RosterEntry(number="48", name="John Smith", position="C")
+    assert entry.number == "48"
+    assert entry.name == "John Smith"
+    assert entry.position == "C"
+
+
+def test_roster_entry_equality() -> None:
+    a = RosterEntry(number="10", name="Jane Doe", position="D")
+    b = RosterEntry(number="10", name="Jane Doe", position="D")
+    assert a == b

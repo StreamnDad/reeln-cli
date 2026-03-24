@@ -38,6 +38,10 @@ def test_game_info_defaults() -> None:
     assert gi.period_length == 0
     assert gi.description == ""
     assert gi.thumbnail == ""
+    assert gi.level == ""
+    assert gi.home_slug == ""
+    assert gi.away_slug == ""
+    assert gi.tournament == ""
 
 
 def test_game_info_custom_fields() -> None:
@@ -158,6 +162,8 @@ def test_game_state_defaults() -> None:
     assert gs.finished_at == ""
     assert gs.renders == []
     assert gs.events == []
+    assert gs.segment_outputs == []
+    assert gs.highlights_output == ""
 
 
 def test_game_state_livestreams_default() -> None:
@@ -212,6 +218,18 @@ def test_game_state_with_events() -> None:
     assert gs.events[0].event_type == "goal"
 
 
+def test_game_state_with_segment_outputs() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, segment_outputs=["period-1_2026-02-26.mkv", "period-2_2026-02-26.mkv"])
+    assert gs.segment_outputs == ["period-1_2026-02-26.mkv", "period-2_2026-02-26.mkv"]
+
+
+def test_game_state_with_highlights_output() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, highlights_output="a_vs_b_2026-02-26.mkv")
+    assert gs.highlights_output == "a_vs_b_2026-02-26.mkv"
+
+
 # ---------------------------------------------------------------------------
 # Serialization: GameInfo
 # ---------------------------------------------------------------------------
@@ -238,6 +256,10 @@ def test_game_info_to_dict() -> None:
         "period_length": 0,
         "description": "",
         "thumbnail": "",
+        "level": "",
+        "home_slug": "",
+        "away_slug": "",
+        "tournament": "",
     }
 
 
@@ -280,6 +302,10 @@ def test_dict_to_game_info_defaults() -> None:
     assert gi.period_length == 0
     assert gi.description == ""
     assert gi.thumbnail == ""
+    assert gi.level == ""
+    assert gi.home_slug == ""
+    assert gi.away_slug == ""
+    assert gi.tournament == ""
 
 
 def test_dict_to_game_info_legacy_rink_fallback() -> None:
@@ -359,6 +385,48 @@ def test_dict_to_game_info_with_description_and_thumbnail() -> None:
     assert gi.thumbnail == "/tmp/thumb.jpg"
 
 
+def test_game_info_to_dict_with_level_and_slugs() -> None:
+    gi = GameInfo(
+        date="2026-03-04",
+        home_team="Roseville",
+        away_team="Mahtomedi",
+        sport="hockey",
+        level="bantam",
+        home_slug="roseville",
+        away_slug="mahtomedi",
+    )
+    d = game_info_to_dict(gi)
+    assert d["level"] == "bantam"
+    assert d["home_slug"] == "roseville"
+    assert d["away_slug"] == "mahtomedi"
+
+
+def test_dict_to_game_info_with_level_and_slugs() -> None:
+    d = {
+        "date": "2026-03-04",
+        "home_team": "Roseville",
+        "away_team": "Mahtomedi",
+        "sport": "hockey",
+        "level": "bantam",
+        "home_slug": "roseville",
+        "away_slug": "mahtomedi",
+    }
+    gi = dict_to_game_info(d)
+    assert gi.level == "bantam"
+    assert gi.home_slug == "roseville"
+    assert gi.away_slug == "mahtomedi"
+
+
+def test_dict_to_game_info_level_defaults_empty() -> None:
+    """Backward compatibility: missing level/slug/tournament fields default to empty strings."""
+    d = {"date": "2026-02-26", "home_team": "a", "away_team": "b", "sport": "generic"}
+    gi = dict_to_game_info(d)
+    assert gi.level == ""
+    assert gi.home_slug == ""
+    assert gi.away_slug == ""
+    assert gi.tournament == ""
+
+
 def test_game_info_round_trip() -> None:
     gi = GameInfo(
         date="2026-03-01",
@@ -371,6 +439,57 @@ def test_game_info_round_trip() -> None:
         period_length=45,
         description="Championship match",
         thumbnail="/img/thumb.png",
+    )
+    assert dict_to_game_info(game_info_to_dict(gi)) == gi
+
+
+def test_game_info_to_dict_with_tournament() -> None:
+    gi = GameInfo(
+        date="2026-03-21",
+        home_team="North",
+        away_team="South",
+        sport="hockey",
+        tournament="2026 Stars of Tomorrow",
+    )
+    d = game_info_to_dict(gi)
+    assert d["tournament"] == "2026 Stars of Tomorrow"
+
+
+def test_dict_to_game_info_with_tournament() -> None:
+    d = {
+        "date": "2026-03-21",
+        "home_team": "North",
+        "away_team": "South",
+        "sport": "hockey",
+        "tournament": "2026 Stars of Tomorrow",
+    }
+    gi = dict_to_game_info(d)
+    assert gi.tournament == "2026 Stars of Tomorrow"
+
+
+def test_game_info_round_trip_with_tournament() -> None:
+    gi = GameInfo(
+        date="2026-03-21",
+        home_team="North",
+        away_team="South",
+        sport="hockey",
+        level="2016",
+        home_slug="north",
+        away_slug="south",
+        tournament="2026 Stars of Tomorrow",
+    )
+    assert dict_to_game_info(game_info_to_dict(gi)) == gi
+
+
+def test_game_info_round_trip_with_level_and_slugs() -> None:
+    gi = GameInfo(
+        date="2026-03-04",
+        home_team="Roseville",
+        away_team="Mahtomedi",
+        sport="hockey",
+        level="bantam",
+        home_slug="roseville",
+        away_slug="mahtomedi",
     )
     assert dict_to_game_info(game_info_to_dict(gi)) == gi
 
@@ -570,6 +689,22 @@ def test_game_state_to_dict() -> None:
     assert d["finished_at"] == ""
     assert d["renders"] == []
     assert d["events"] == []
+    assert d["segment_outputs"] == []
+    assert d["highlights_output"] == ""
+
+
+def test_game_state_to_dict_with_segment_outputs() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, segment_outputs=["period-1_2026-02-26.mkv"])
+    d = game_state_to_dict(gs)
+    assert d["segment_outputs"] == ["period-1_2026-02-26.mkv"]
+
+
+def test_game_state_to_dict_with_highlights_output() -> None:
+    gi = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
+    gs = GameState(game_info=gi, highlights_output="a_vs_b_2026-02-26.mkv")
+    d = game_state_to_dict(gs)
+    assert d["highlights_output"] == "a_vs_b_2026-02-26.mkv"
 
 
 def test_game_state_to_dict_with_livestreams() -> None:
@@ -662,6 +797,64 @@ def test_dict_to_game_state_defaults() -> None:
     assert gs.finished_at == ""
     assert gs.renders == []
     assert gs.events == []
+    assert gs.segment_outputs == []
+    assert gs.highlights_output == ""
+
+
+def test_dict_to_game_state_with_segment_outputs() -> None:
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+        "segment_outputs": ["period-1_2026-02-26.mkv", "period-2_2026-02-26.mkv"],
+    }
+    gs = dict_to_game_state(d)
+    assert gs.segment_outputs == ["period-1_2026-02-26.mkv", "period-2_2026-02-26.mkv"]
+
+
+def test_dict_to_game_state_with_highlights_output() -> None:
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+        "highlights_output": "a_vs_b_2026-02-26.mkv",
+    }
+    gs = dict_to_game_state(d)
+    assert gs.highlights_output == "a_vs_b_2026-02-26.mkv"
+
+
+def test_dict_to_game_state_segment_outputs_missing() -> None:
+    """Backward compatibility: missing segment_outputs defaults to empty list."""
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+    }
+    gs = dict_to_game_state(d)
+    assert gs.segment_outputs == []
+
+
+def test_dict_to_game_state_highlights_output_missing() -> None:
+    """Backward compatibility: missing highlights_output defaults to empty string."""
+    d = {
+        "game_info": {
+            "date": "2026-02-26",
+            "home_team": "a",
+            "away_team": "b",
+            "sport": "generic",
+        },
+    }
+    gs = dict_to_game_state(d)
+    assert gs.highlights_output == ""
 
 
 def test_dict_to_game_state_with_livestreams() -> None:
@@ -794,5 +987,7 @@ def test_game_state_round_trip() -> None:
         renders=[entry],
         events=[ev],
         livestreams={"google": "https://youtube.com/live/abc123"},
+        segment_outputs=["quarter-1_2026-03-01.mkv", "quarter-2_2026-03-01.mkv"],
+        highlights_output="x_vs_y_2026-03-01.mkv",
     )
     assert dict_to_game_state(game_state_to_dict(gs)) == gs

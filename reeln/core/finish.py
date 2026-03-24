@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def finish_game(
     state.finished_at = datetime.now(UTC).isoformat()
 
     if not dry_run:
+        _relocated, reloc_messages = relocate_outputs(game_dir, state)
         save_game_state(state, game_dir)
 
         from reeln.plugins.hooks import Hook, HookContext
@@ -48,15 +50,64 @@ def finish_game(
         get_registry().emit(Hook.ON_GAME_FINISH, ctx)
 
         # Second pass — plugins read what others wrote during FINISH
-        post_ctx = HookContext(
-            hook=Hook.ON_POST_GAME_FINISH, data=hook_data, shared=ctx.shared
-        )
+        post_ctx = HookContext(hook=Hook.ON_POST_GAME_FINISH, data=hook_data, shared=ctx.shared)
         get_registry().emit(Hook.ON_POST_GAME_FINISH, post_ctx)
 
         log.info("Game finished: %s", game_dir)
+    else:
+        reloc_messages = []
 
     messages = _build_summary(state)
+    messages.extend(reloc_messages)
     return state, messages
+
+
+def relocate_outputs(
+    game_dir: Path,
+    state: GameState,
+    *,
+    dry_run: bool = False,
+) -> tuple[list[Path], list[str]]:
+    """Move segment and highlights outputs into ``game_dir / outputs/``.
+
+    Files are located in ``game_dir.parent`` (the shared output directory).
+    Missing files are skipped gracefully.
+
+    Returns ``(relocated_paths, messages)``.
+    """
+    source_dir = game_dir.parent
+    outputs_dir = game_dir / "outputs"
+
+    filenames: list[str] = list(state.segment_outputs)
+    if state.highlights_output:
+        filenames.append(state.highlights_output)
+
+    if not filenames:
+        return [], []
+
+    relocated: list[Path] = []
+    messages: list[str] = []
+
+    for name in filenames:
+        src = source_dir / name
+        if not src.is_file():
+            log.debug("Skipping missing output: %s", src)
+            continue
+
+        if not dry_run:
+            outputs_dir.mkdir(parents=True, exist_ok=True)
+            dst = outputs_dir / name
+            shutil.move(str(src), str(dst))
+            relocated.append(dst)
+            messages.append(f"Relocated {name} → outputs/")
+        else:
+            relocated.append(src)
+            messages.append(f"Would relocate {name} → outputs/")
+
+    if relocated:
+        log.info("Relocated %d output(s) to %s", len(relocated), outputs_dir)
+
+    return relocated, messages
 
 
 def _build_summary(state: GameState) -> list[str]:

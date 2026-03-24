@@ -5,7 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.0.33] - 2026-03-23
+
+### Added
+- Branding overlay on rendered shorts: shows "reeln v{version} by https://streamn.dad" with a black-bordered white text at the top of the video for the first ~5 seconds with a smooth fade-out — enabled by default, configurable via `branding` config section, disable with `--no-branding` CLI flag
+- `BrandingConfig` model (`enabled`, `template`, `duration`) for per-user branding customization
+- Bundled `branding.ass` ASS template with `\fad(300,800)` animation and black outline for visibility over any background
+- `--no-branding` flag on `render short` and `render preview` commands
+- Branding renders only on the first iteration in multi-iteration mode
+- Cross-fade transitions between iterations: uses ffmpeg `xfade` + `acrossfade` filters for smooth 0.5s fade transitions instead of hard cuts, with automatic fallback to concat demuxer if xfade fails
+- Smart zoom support in the iteration pipeline: `--smart --iterate` now extracts frames once upfront and passes the zoom path through to each iteration's `plan_short()` call
+- `speed_segments` in render profiles for variable speed within a single clip — e.g., normal speed → slow motion → normal speed, using the proven split/trim/concat ffmpeg pattern
+- `--player-numbers` (`-n`) flag on `render short`, `render preview`, and `render apply` for roster-based player lookup: accepts comma-separated jersey numbers (e.g., `--player-numbers 48,24,2`), looks up names from the team roster CSV, and populates goal scorer and assist overlays automatically
+- `--event-type` flag on render commands for scoring team resolution: `HOME_GOAL`/`AWAY_GOAL` determines which team's roster to look up
+- `RosterEntry` data model and `load_roster()` / `lookup_players()` / `resolve_scoring_team()` core functions for roster management
+- `GameInfo` now persists `level`, `home_slug`, and `away_slug` when `game init --level` is used, enabling roster lookup during rendering
+- `build_overlay_context()` accepts optional `scoring_team` parameter to override the default (home team)
+- Smart target zoom (`--crop smart`): extracts frames from clips, emits `ON_FRAMES_EXTRACTED` hook for vision plugins (e.g. reeln-plugin-openai) to detect action targets, then builds dynamic ffmpeg crop expressions that smoothly pan across detected targets
+- `ZoomPoint`, `ZoomPath`, and `ExtractedFrames` data models for smart zoom contracts
+- `ON_FRAMES_EXTRACTED` lifecycle hook for plugins to analyze extracted video frames
+- `extract_frames()` method on the Renderer protocol and FFmpegRenderer for frame extraction
+- `build_piecewise_lerp()` and `build_smart_crop_filter()` for dynamic ffmpeg crop expressions
+- `--zoom-frames` option on `render short` and `render preview` (default 5, range 1-20)
+- Zoom debug output: `debug/zoom/zoom_path.json` and frame symlinks when `--debug` is used with smart crop
+- Smart pad mode (`--crop smart_pad`): follows action vertically like smart zoom but keeps black bars instead of filling the entire frame — falls back to static pad when no vision plugin provides data
+- `build_smart_pad_filter()` for dynamic vertical pad positioning based on zoom path center_y
+- Debug crosshair annotations: extracted frames in `debug/zoom/` now include annotated copies with green crop box and red crosshair overlays showing detected center points
+- `--scale` option on `render short` and `render preview` (0.5-3.0, default 1.0): zooms in by scaling up the intermediate frame before crop/pad — works with all crop modes including smart tracking
+- `--smart` flag on `render short` and `render preview`: enables smart tracking via vision plugin as an orthogonal option, composable with `--crop pad|crop` and `--scale`
+- `build_overflow_crop_filter()` for pad + scale > 1.0: crops overflow after scale-up before padding
+- Automatic fallback from smart crop to center crop (or smart_pad to static pad) when no vision plugin provides zoom data
+- `--no-enforce-hooks` global CLI flag to temporarily disable registry-based hook enforcement for plugins
+- `game finish` now relocates segment and highlights outputs from the shared output directory into `game_dir/outputs/`, preventing file collisions across multiple games per day
+- `game init` now blocks with a clear error if an unfinished game exists — run `reeln game finish` first
+- `GameState` tracks `segment_outputs` and `highlights_output` for file relocation
+- `find_unfinished_games()` helper scans for active game directories
+- `relocate_outputs()` helper moves output files into the game directory
+- `reeln doctor` now collects and runs health checks from plugins that implement `doctor_checks()`
+- `doctor` capability added to plugin duck-type detection
+- `--tournament` CLI flag on `game init` for optional tournament name/context — flows through to plugins via hook context and overlay templates
+- `tournament` and `level` fields now included in template context (`build_base_context()`), available as `{{tournament}}` and `{{level}}` in ASS subtitle templates
+
+### Changed
+- Scale, framing (crop/pad), and smart tracking are now orthogonal axes — any combination works without dedicated enum values
+- Short/preview renders now output to a `shorts/` subdirectory by default (e.g., `period-2/shorts/clip_short.mp4`) to prevent segment merges from picking up rendered files
+
+### Deprecated
+- `--crop smart` — use `--crop crop --smart` instead (still works, shows deprecation warning)
+- `--crop smart_pad` — use `--crop pad --smart` instead (still works, shows deprecation warning)
+
+### Fixed
+- `team_level` in overlay context now uses the actual team level (e.g., "2016", "bantam") instead of the sport name — previously showed "hockey" instead of the level
+- Segment merge and highlights merge output extension now matches input files instead of being hardcoded to `.mkv`
+- Highlights merge now discovers segment files with any video extension (`.mp4`, `.mkv`, `.mov`, etc.), not just `.mkv`
 
 ## [0.0.32] - 2026-03-15
 

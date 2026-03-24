@@ -17,6 +17,7 @@ from reeln.core.highlights import (
     create_game_directory,
     detect_next_game_number,
     find_segment_videos,
+    find_unfinished_games,
     game_dir_name,
     init_game,
     load_game_state,
@@ -166,10 +167,15 @@ def test_init_game_dry_run(tmp_path: Path) -> None:
 
 
 def test_init_game_auto_game_number(tmp_path: Path) -> None:
+    from reeln.core.finish import finish_game
+
     # Create first game
     info1 = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
     game_dir1, _ = init_game(tmp_path, info1)
     assert game_dir1.name == "2026-02-26_a_vs_b"
+
+    # Finish first game before starting second
+    finish_game(game_dir1)
 
     # Second init auto-detects double-header
     info2 = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
@@ -372,6 +378,20 @@ def test_find_segment_videos_excludes_subdirectories(tmp_path: Path) -> None:
 
     result = find_segment_videos(seg_dir, "period-1")
     assert len(result) == 1
+
+
+def test_find_segment_videos_excludes_shorts_subdir(tmp_path: Path) -> None:
+    """Shorts rendered into a shorts/ subdirectory are not picked up."""
+    seg_dir = tmp_path / "period-1"
+    seg_dir.mkdir()
+    (seg_dir / "replay1.mkv").touch()
+    shorts_dir = seg_dir / "shorts"
+    shorts_dir.mkdir()
+    (shorts_dir / "replay1_short.mp4").touch()
+
+    result = find_segment_videos(seg_dir, "period-1")
+    assert len(result) == 1
+    assert result[0].name == "replay1.mkv"
 
 
 def test_find_segment_videos_multiple_extensions(tmp_path: Path) -> None:
@@ -1041,10 +1061,11 @@ def test_init_game_persists_livestreams(tmp_path: Path) -> None:
     get_registry().register(Hook.ON_GAME_INIT, fake_plugin)
 
     info = GameInfo(date="2026-02-26", home_team="a", away_team="b", sport="hockey")
-    game_dir, _ = init_game(tmp_path, info)
+    game_dir, messages = init_game(tmp_path, info)
 
     state = load_game_state(game_dir)
     assert state.livestreams == {"google": "https://youtube.com/live/abc123"}
+    assert any("Livestream (google): https://youtube.com/live/abc123" in m for m in messages)
 
 
 def test_init_game_emits_on_game_ready(tmp_path: Path) -> None:
@@ -1320,3 +1341,240 @@ def test_merge_highlights_dry_run_no_hook(tmp_path: Path) -> None:
     merge_game_highlights(game_dir, ffmpeg_path=ffmpeg, dry_run=True)
 
     assert len(emitted) == 0
+
+
+# ---------------------------------------------------------------------------
+# find_unfinished_games
+# ---------------------------------------------------------------------------
+
+
+def _write_state_file(game_dir: Path, state: GameState) -> None:
+    """Write a game.json to *game_dir* for test setup."""
+    game_dir.mkdir(parents=True, exist_ok=True)
+    save_game_state(state, game_dir)
+
+
+def test_find_unfinished_games_none(tmp_path: Path) -> None:
+    assert find_unfinished_games(tmp_path) == []
+
+
+def test_find_unfinished_games_missing_dir(tmp_path: Path) -> None:
+    assert find_unfinished_games(tmp_path / "nonexistent") == []
+
+
+def test_find_unfinished_games_finds_unfinished(tmp_path: Path) -> None:
+    gi = GameInfo(date="2026-03-15", home_team="a", away_team="b", sport="hockey")
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    _write_state_file(game_dir, GameState(game_info=gi))
+
+    result = find_unfinished_games(tmp_path)
+    assert len(result) == 1
+    assert result[0] == game_dir
+
+
+def test_find_unfinished_games_skips_finished(tmp_path: Path) -> None:
+    gi = GameInfo(date="2026-03-15", home_team="a", away_team="b", sport="hockey")
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    _write_state_file(game_dir, GameState(game_info=gi, finished=True, finished_at="2026-03-15T20:00:00+00:00"))
+
+    result = find_unfinished_games(tmp_path)
+    assert result == []
+
+
+def test_find_unfinished_games_mixed(tmp_path: Path) -> None:
+    gi1 = GameInfo(date="2026-03-15", home_team="a", away_team="b", sport="hockey")
+    gi2 = GameInfo(date="2026-03-15", home_team="c", away_team="d", sport="hockey")
+    g1 = tmp_path / "2026-03-15_a_vs_b"
+    g2 = tmp_path / "2026-03-15_c_vs_d"
+    _write_state_file(g1, GameState(game_info=gi1, finished=True, finished_at="2026-03-15T18:00:00+00:00"))
+    _write_state_file(g2, GameState(game_info=gi2))
+
+    result = find_unfinished_games(tmp_path)
+    assert result == [g2]
+
+
+def test_find_unfinished_games_skips_non_dirs(tmp_path: Path) -> None:
+    (tmp_path / "not_a_dir.txt").write_text("hello")
+    assert find_unfinished_games(tmp_path) == []
+
+
+def test_find_unfinished_games_skips_invalid_json(tmp_path: Path) -> None:
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text("not valid json")
+
+    assert find_unfinished_games(tmp_path) == []
+
+
+def test_find_unfinished_games_skips_dirs_without_state(tmp_path: Path) -> None:
+    (tmp_path / "some_dir").mkdir()
+    assert find_unfinished_games(tmp_path) == []
+
+
+# ---------------------------------------------------------------------------
+# init_game — unfinished game guard
+# ---------------------------------------------------------------------------
+
+
+def test_init_game_blocks_if_unfinished(tmp_path: Path) -> None:
+    """init_game raises MediaError when an unfinished game exists."""
+    gi1 = GameInfo(date="2026-03-15", home_team="ducks", away_team="kraken", sport="hockey")
+    g1 = tmp_path / "2026-03-15_ducks_vs_kraken"
+    _write_state_file(g1, GameState(game_info=gi1))
+
+    gi2 = GameInfo(date="2026-03-15", home_team="wild", away_team="jets", sport="hockey")
+    with pytest.raises(MediaError, match=r"Unfinished game.*ducks_vs_kraken"):
+        init_game(tmp_path, gi2)
+
+
+def test_init_game_allows_after_finish(tmp_path: Path) -> None:
+    """init_game succeeds when all prior games are finished."""
+    gi1 = GameInfo(date="2026-03-15", home_team="ducks", away_team="kraken", sport="hockey")
+    g1 = tmp_path / "2026-03-15_ducks_vs_kraken"
+    _write_state_file(g1, GameState(game_info=gi1, finished=True, finished_at="2026-03-15T18:00:00+00:00"))
+
+    gi2 = GameInfo(date="2026-03-15", home_team="wild", away_team="jets", sport="hockey")
+    game_dir, _messages = init_game(tmp_path, gi2)
+
+    assert game_dir.is_dir()
+    assert "wild" in game_dir.name
+
+
+def test_init_game_dry_run_still_checks_unfinished(tmp_path: Path) -> None:
+    """Unfinished game guard fires even in dry-run mode."""
+    gi1 = GameInfo(date="2026-03-15", home_team="ducks", away_team="kraken", sport="hockey")
+    g1 = tmp_path / "2026-03-15_ducks_vs_kraken"
+    _write_state_file(g1, GameState(game_info=gi1))
+
+    gi2 = GameInfo(date="2026-03-15", home_team="wild", away_team="jets", sport="hockey")
+    with pytest.raises(MediaError, match=r"Unfinished game"):
+        init_game(tmp_path, gi2, dry_run=True)
+
+
+# ---------------------------------------------------------------------------
+# process_segment — output tracking
+# ---------------------------------------------------------------------------
+
+
+def test_process_segment_records_output(tmp_path: Path) -> None:
+    """process_segment appends the output filename to state.segment_outputs."""
+    game_dir = _make_game_dir(tmp_path)
+    seg_dir = game_dir / "period-1"
+    (seg_dir / "replay1.mkv").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        process_segment(game_dir, 1, ffmpeg_path=ffmpeg)
+
+    state = load_game_state(game_dir)
+    assert "period-1_2026-02-26.mkv" in state.segment_outputs
+
+
+def test_process_segment_output_idempotent(tmp_path: Path) -> None:
+    """Running segment twice doesn't duplicate segment_outputs."""
+    game_dir = _make_game_dir(tmp_path)
+    seg_dir = game_dir / "period-1"
+    (seg_dir / "replay1.mkv").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        process_segment(game_dir, 1, ffmpeg_path=ffmpeg)
+        (seg_dir / "replay2.mkv").touch()
+        process_segment(game_dir, 1, ffmpeg_path=ffmpeg)
+
+    state = load_game_state(game_dir)
+    assert state.segment_outputs.count("period-1_2026-02-26.mkv") == 1
+
+
+def test_process_segment_dry_run_no_output_tracking(tmp_path: Path) -> None:
+    """Dry run does not record segment outputs."""
+    game_dir = _make_game_dir(tmp_path)
+    seg_dir = game_dir / "period-1"
+    (seg_dir / "replay1.mkv").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    process_segment(game_dir, 1, ffmpeg_path=ffmpeg, dry_run=True)
+
+    state = load_game_state(game_dir)
+    assert state.segment_outputs == []
+
+
+# ---------------------------------------------------------------------------
+# merge_game_highlights — output tracking
+# ---------------------------------------------------------------------------
+
+
+def test_merge_highlights_records_output(tmp_path: Path) -> None:
+    """merge_game_highlights records the highlights output filename."""
+    game_dir = _make_game_dir(tmp_path)
+    for i in range(1, 4):
+        (tmp_path / f"period-{i}_2026-02-26.mkv").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        merge_game_highlights(game_dir, ffmpeg_path=ffmpeg)
+
+    state = load_game_state(game_dir)
+    assert state.highlights_output == "roseville_vs_mahtomedi_2026-02-26.mkv"
+
+
+def test_merge_highlights_dry_run_no_output_tracking(tmp_path: Path) -> None:
+    """Dry run does not record highlights output."""
+    game_dir = _make_game_dir(tmp_path)
+    for i in range(1, 4):
+        (tmp_path / f"period-{i}_2026-02-26.mkv").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    merge_game_highlights(game_dir, ffmpeg_path=ffmpeg, dry_run=True)
+
+    state = load_game_state(game_dir)
+    assert state.highlights_output == ""
+
+
+# ---------------------------------------------------------------------------
+# Output extension matching
+# ---------------------------------------------------------------------------
+
+
+def test_process_segment_output_matches_input_ext(tmp_path: Path) -> None:
+    """Output extension matches input files when all are the same format."""
+    game_dir = _make_game_dir(tmp_path)
+    seg_dir = game_dir / "period-1"
+    (seg_dir / "replay1.mp4").write_bytes(b"video")
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        result, _ = process_segment(game_dir, 1, ffmpeg_path=ffmpeg)
+
+    assert result.output.suffix == ".mp4"
+    assert result.output.name == "period-1_2026-02-26.mp4"
+
+
+def test_process_segment_mixed_ext_defaults_mkv(tmp_path: Path) -> None:
+    """Mixed input extensions fall back to .mkv output."""
+    game_dir = _make_game_dir(tmp_path)
+    seg_dir = game_dir / "period-1"
+    (seg_dir / "replay1.mkv").write_bytes(b"video")
+    (seg_dir / "replay2.mp4").write_bytes(b"video")
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        result, _ = process_segment(game_dir, 1, ffmpeg_path=ffmpeg)
+
+    assert result.output.suffix == ".mkv"
+    assert result.copy is False
+
+
+def test_merge_highlights_finds_mp4_segments(tmp_path: Path) -> None:
+    """merge_game_highlights discovers .mp4 segment files."""
+    game_dir = _make_game_dir(tmp_path)
+    for i in range(1, 4):
+        (tmp_path / f"period-{i}_2026-02-26.mp4").touch()
+
+    ffmpeg = Path("/usr/bin/ffmpeg")
+    with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_ffmpeg_success()):
+        result, _ = merge_game_highlights(game_dir, ffmpeg_path=ffmpeg)
+
+    assert result.output.suffix == ".mp4"
+    assert result.output.name == "roseville_vs_mahtomedi_2026-02-26.mp4"
+    assert len(result.segment_files) == 3

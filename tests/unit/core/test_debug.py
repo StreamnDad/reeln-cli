@@ -273,8 +273,9 @@ def test_collect_debug_artifacts(tmp_path: Path) -> None:
 
     collected = collect_debug_artifacts(tmp_path)
     assert len(collected) == 2
-    assert collected[0].operation == "op1"
-    assert collected[1].operation == "op2"
+    # Newest first (reverse chronological)
+    assert collected[0].operation == "op2"
+    assert collected[1].operation == "op1"
 
 
 def test_collect_debug_artifacts_empty_dir(tmp_path: Path) -> None:
@@ -339,6 +340,7 @@ def test_write_debug_index_empty(tmp_path: Path) -> None:
     content = path.read_text(encoding="utf-8")
     assert "reeln Debug Index" in content
     assert "No debug artifacts found" in content
+    assert "logo.jpg" in content
 
 
 def test_write_debug_index_with_artifacts(tmp_path: Path) -> None:
@@ -542,3 +544,62 @@ def test_debug_index_extra_section(tmp_path: Path) -> None:
 
     assert "segment_number" in content
     assert "Extra:" in content
+
+
+# ---------------------------------------------------------------------------
+# Zoom debug section in HTML index
+# ---------------------------------------------------------------------------
+
+
+def test_debug_index_zoom_section(tmp_path: Path) -> None:
+    """Zoom subdirectory is rendered in the HTML index."""
+    zoom_dir = tmp_path / "debug" / "zoom"
+    zoom_dir.mkdir(parents=True)
+    (zoom_dir / "frame_0000.png").write_bytes(b"png")
+    (zoom_dir / "annotated_0000.png").write_bytes(b"png")
+    (zoom_dir / "zoom_path.json").write_text('{"test": true}')
+
+    path = write_debug_index(tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Smart Zoom Debug" in content
+    assert "zoom/frame_0000.png" in content
+    assert "zoom/annotated_0000.png" in content
+    assert "zoom/zoom_path.json" in content
+    assert "Annotated frames" in content
+    assert "Extracted frames" in content
+
+
+def test_debug_index_zoom_plugin_debug(tmp_path: Path) -> None:
+    """Plugin debug JSON is rendered in the HTML index."""
+    zoom_dir = tmp_path / "debug" / "zoom"
+    zoom_dir.mkdir(parents=True)
+    (zoom_dir / "plugin_debug.json").write_text('{"prompt": "analyze this frame", "model": "gpt-4o"}')
+
+    path = write_debug_index(tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Plugin debug data" in content
+    assert "analyze this frame" in content
+    assert "gpt-4o" in content
+
+
+def test_debug_index_no_zoom_dir(tmp_path: Path) -> None:
+    """Without a zoom directory, no zoom section appears."""
+    path = write_debug_index(tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Smart Zoom Debug" not in content
+
+
+def test_debug_index_zoom_corrupt_plugin_debug(tmp_path: Path) -> None:
+    """Corrupt plugin_debug.json is silently skipped."""
+    zoom_dir = tmp_path / "debug" / "zoom"
+    zoom_dir.mkdir(parents=True)
+    (zoom_dir / "plugin_debug.json").write_text("not valid json!!!")
+
+    path = write_debug_index(tmp_path)
+    content = path.read_text(encoding="utf-8")
+
+    assert "Smart Zoom Debug" in content
+    assert "Plugin debug data" not in content

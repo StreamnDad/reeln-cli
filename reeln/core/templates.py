@@ -90,6 +90,8 @@ def build_base_context(
         "game_number": str(game_info.game_number),
         "game_time": game_info.game_time,
         "period_length": str(game_info.period_length),
+        "level": game_info.level,
+        "tournament": game_info.tournament,
     }
     if event is not None:
         variables["event_type"] = event.event_type

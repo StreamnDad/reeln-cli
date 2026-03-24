@@ -83,6 +83,7 @@ def build_overlay_context(
     home_colors: list[str] | None = None,
     away_colors: list[str] | None = None,
     y_offset: int = 0,
+    scoring_team: str | None = None,
 ) -> TemplateContext:
     """Enrich a template context with overlay-specific variables.
 
@@ -98,23 +99,21 @@ def build_overlay_context(
     assist_1, assist_2 = _parse_assists(event_metadata)
     has_assists = bool(assist_1 or assist_2)
 
-    # Timing
+    # Timing — add 1s buffer past video duration so the overlay never
+    # disappears before the last frame (ffmpeg truncates to the shorter
+    # stream via shortest=1 or the video's own duration).
+    end_time = duration + 1.0
     scorer_start = format_ass_time(0.0)
-    scorer_end = format_ass_time(duration)
+    scorer_end = format_ass_time(end_time)
     assist_start = format_ass_time(0.0)
-    assist_end = format_ass_time(duration if has_assists else 0.0)
+    assist_end = format_ass_time(end_time if has_assists else 0.0)
+    box_end = format_ass_time(end_time)
 
     # Font sizing
     scorer_base = 46 if has_assists else 54
     scorer_min = 32 if has_assists else 38
-    goal_scorer_fs = str(
-        overlay_font_size(scorer_text, base=scorer_base, min_size=scorer_min, max_chars=24)
-    )
-    goal_assist_fs = str(
-        overlay_font_size(
-            f"{assist_1} {assist_2}".strip(), base=24, min_size=18, max_chars=30
-        )
-    )
+    goal_scorer_fs = str(overlay_font_size(scorer_text, base=scorer_base, min_size=scorer_min, max_chars=24))
+    goal_assist_fs = str(overlay_font_size(f"{assist_1} {assist_2}".strip(), base=24, min_size=18, max_chars=30))
 
     # Colors
     primary_rgb = _DEFAULT_PRIMARY
@@ -139,12 +138,22 @@ def build_overlay_context(
     ass_team_text_color = rgb_to_ass(name_rgb, 0x40)
     ass_name_outline_color = rgb_to_ass(outline_rgb, 0)
 
-    # Team and level from base context
-    goal_scorer_team = base.get("home_team", "")
-    team_level = base.get("sport", "")
+    # Team and level from base context — uppercase for visual emphasis.
+    # When a tournament is configured, promote it to the title position
+    # and combine team/level into the secondary slot.
+    tournament = base.get("tournament", "").strip()
+    team_name = (scoring_team if scoring_team is not None else base.get("home_team", "")).upper()
+    level = base.get("level", "").upper()
+    if tournament:
+        goal_scorer_team = tournament.upper()
+        team_level = f"{team_name}/{level}" if level else team_name
+    else:
+        goal_scorer_team = team_name
+        team_level = level
 
     # Layout coordinates (ported from old CLI)
     variables: dict[str, str] = {
+        "box_end": box_end,
         "goal_scorer_text": scorer_text,
         "goal_assist_1": assist_1,
         "goal_assist_2": assist_2,

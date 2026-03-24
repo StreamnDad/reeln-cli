@@ -273,12 +273,8 @@ class TestMergeAllPluginDefaults:
         assert result == {"other": {"k": "v"}}
 
     def test_multiple_plugins(self) -> None:
-        schema_a = PluginConfigSchema(
-            fields=(ConfigField(name="flag_a", field_type="bool", default=True),)
-        )
-        schema_b = PluginConfigSchema(
-            fields=(ConfigField(name="flag_b", field_type="bool", default=False),)
-        )
+        schema_a = PluginConfigSchema(fields=(ConfigField(name="flag_a", field_type="bool", default=True),))
+        schema_b = PluginConfigSchema(fields=(ConfigField(name="flag_b", field_type="bool", default=False),))
 
         def _mock_schema(name: str) -> PluginConfigSchema | None:
             return {"a": schema_a, "b": schema_b}.get(name)

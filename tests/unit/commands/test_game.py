@@ -182,6 +182,13 @@ def test_game_init_double_header(tmp_path: Path) -> None:
     )
     assert result1.exit_code == 0
 
+    # Finish first game before starting second
+    result_finish = runner.invoke(
+        app,
+        ["game", "finish", "-o", str(tmp_path / f"{_today()}_a_vs_b")],
+    )
+    assert result_finish.exit_code == 0
+
     # Second game — auto-detects double-header
     result2 = runner.invoke(
         app,
@@ -282,6 +289,7 @@ def _mock_collect(**overrides: object) -> dict[str, object]:
         "period_length": 0,
         "description": "",
         "thumbnail": "",
+        "tournament": "",
         "home_profile": None,
         "away_profile": None,
     }
@@ -469,6 +477,72 @@ def test_game_init_with_level_resolves_profiles(tmp_path: Path) -> None:
     assert game_dir.is_dir()
 
 
+def test_game_init_with_level_persists_slugs(tmp_path: Path) -> None:
+    """Non-interactive mode: --level stores level and team slugs in game.json."""
+    from reeln.models.team import TeamProfile
+
+    home_profile = TeamProfile(team_name="Roseville", short_name="ROS", level="bantam")
+    away_profile = TeamProfile(team_name="Mahtomedi", short_name="MAH", level="bantam")
+
+    with patch("reeln.core.teams.load_team_profile") as mock_load:
+        mock_load.side_effect = [home_profile, away_profile]
+        result = runner.invoke(
+            app,
+            ["game", "init", "roseville", "mahtomedi", "--level", "bantam", "-o", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    game_dir = tmp_path / f"{_today()}_Roseville_vs_Mahtomedi"
+    state = json.loads((game_dir / "game.json").read_text(encoding="utf-8"))
+    assert state["game_info"]["level"] == "bantam"
+    assert state["game_info"]["home_slug"] == "roseville"
+    assert state["game_info"]["away_slug"] == "mahtomedi"
+
+
+def test_game_init_with_tournament(tmp_path: Path) -> None:
+    """Non-interactive mode: --tournament is stored in game.json."""
+    result = runner.invoke(
+        app,
+        ["game", "init", "a", "b", "--tournament", "2026 Stars of Tomorrow", "-o", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+
+    game_dir = tmp_path / f"{_today()}_a_vs_b"
+    state = json.loads((game_dir / "game.json").read_text(encoding="utf-8"))
+    assert state["game_info"]["tournament"] == "2026 Stars of Tomorrow"
+
+
+def test_game_init_interactive_passes_tournament_preset(tmp_path: Path) -> None:
+    """When --tournament is set, it's passed as preset (not None)."""
+    result_dict = _mock_collect(tournament="Stars Cup")
+    with patch(
+        "reeln.commands.game.collect_game_info_interactive",
+        return_value=result_dict,
+    ) as mock_collect:
+        result = runner.invoke(
+            app,
+            ["game", "init", "--tournament", "Stars Cup", "-o", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    call_kwargs = mock_collect.call_args.kwargs
+    assert call_kwargs["tournament"] == "Stars Cup"
+
+
+def test_game_init_without_level_no_slugs(tmp_path: Path) -> None:
+    """Without --level, level/slug fields default to empty strings."""
+    result = runner.invoke(
+        app,
+        ["game", "init", "a", "b", "-o", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    game_dir = tmp_path / f"{_today()}_a_vs_b"
+    state = json.loads((game_dir / "game.json").read_text(encoding="utf-8"))
+    assert state["game_info"]["level"] == ""
+    assert state["game_info"]["home_slug"] == ""
+    assert state["game_info"]["away_slug"] == ""
+
+
 def test_game_init_with_level_missing_profile(tmp_path: Path) -> None:
     """Non-interactive mode: --level with unknown slug raises error."""
     with patch(
@@ -505,13 +579,39 @@ def test_game_init_interactive_passes_period_length_preset(tmp_path: Path) -> No
         "reeln.commands.game.collect_game_info_interactive",
         return_value=result_dict,
     ) as mock_collect:
-        result = runner.invoke(
-            app, ["game", "init", "--period-length", "12", "-o", str(tmp_path)]
-        )
+        result = runner.invoke(app, ["game", "init", "--period-length", "12", "-o", str(tmp_path)])
 
     assert result.exit_code == 0
     call_kwargs = mock_collect.call_args.kwargs
     assert call_kwargs["period_length"] == 12
+
+
+def test_game_init_interactive_passes_level_preset(tmp_path: Path) -> None:
+    """When --level is set in interactive mode, it's passed as preset."""
+    result_dict = _mock_collect()
+    with patch(
+        "reeln.commands.game.collect_game_info_interactive",
+        return_value=result_dict,
+    ) as mock_collect:
+        result = runner.invoke(app, ["game", "init", "--level", "2016", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_collect.call_args.kwargs
+    assert call_kwargs["level"] == "2016"
+
+
+def test_game_init_interactive_level_none_by_default(tmp_path: Path) -> None:
+    """When --level is not set, level is None in interactive mode."""
+    result_dict = _mock_collect()
+    with patch(
+        "reeln.commands.game.collect_game_info_interactive",
+        return_value=result_dict,
+    ) as mock_collect:
+        result = runner.invoke(app, ["game", "init", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_collect.call_args.kwargs
+    assert call_kwargs["level"] is None
 
 
 # ---------------------------------------------------------------------------

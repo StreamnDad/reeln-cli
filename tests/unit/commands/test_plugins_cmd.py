@@ -370,7 +370,11 @@ def test_plugins_install_with_version() -> None:
     assert result.exit_code == 0
     assert "installed successfully" in result.output
     mock_install.assert_called_once_with(
-        "youtube", entries, dry_run=False, installer="", version="1.2.0",
+        "youtube",
+        entries,
+        dry_run=False,
+        installer="",
+        version="1.2.0",
     )
 
 
@@ -421,7 +425,11 @@ def test_plugins_update_with_version() -> None:
     assert result.exit_code == 0
     assert "updated successfully" in result.output
     mock_update.assert_called_once_with(
-        "youtube", entries, dry_run=False, installer="", version="2.0.0",
+        "youtube",
+        entries,
+        dry_run=False,
+        installer="",
+        version="2.0.0",
     )
 
 

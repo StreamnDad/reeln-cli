@@ -120,6 +120,8 @@ def test_build_base_context_game_info_only() -> None:
     assert ctx.get("game_number") == "1"
     assert ctx.get("game_time") == ""
     assert ctx.get("period_length") == "0"
+    assert ctx.get("level") == ""
+    assert ctx.get("tournament") == ""
     assert ctx.get("event_type") == ""  # not present
 
 
@@ -133,6 +135,20 @@ def test_build_base_context_with_game_time() -> None:
     )
     ctx = build_base_context(info)
     assert ctx.get("game_time") == "7:00 PM"
+
+
+def test_build_base_context_with_level_and_tournament() -> None:
+    info = GameInfo(
+        date="2026-03-21",
+        home_team="North",
+        away_team="South",
+        sport="hockey",
+        level="2016",
+        tournament="2026 Stars of Tomorrow",
+    )
+    ctx = build_base_context(info)
+    assert ctx.get("level") == "2016"
+    assert ctx.get("tournament") == "2026 Stars of Tomorrow"
 
 
 def test_build_base_context_with_event() -> None:

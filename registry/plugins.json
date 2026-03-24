@@ -34,10 +34,10 @@
     {
       "name": "openai",
       "package": "reeln-plugin-openai",
-      "description": "OpenAI-powered LLM integration — livestream metadata, game thumbnails, and translation",
-      "capabilities": ["hook:ON_GAME_INIT"],
+      "description": "OpenAI-powered LLM integration — livestream metadata, short metadata, game thumbnails, and translation",
+      "capabilities": ["hook:ON_GAME_INIT", "hook:POST_RENDER", "hook:ON_FRAMES_EXTRACTED"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-openai",
-      "min_reeln_version": "0.0.19",
+      "min_reeln_version": "0.0.33",
       "author": "StreamnDad",
       "license": "AGPL-3.0"
     }

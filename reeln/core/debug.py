@@ -186,7 +186,7 @@ def collect_debug_artifacts(game_dir: Path) -> list[DebugArtifact]:
             log.debug("Skipping corrupt debug artifact: %s", f)
             continue
 
-    return sorted(artifacts, key=lambda a: a.timestamp)
+    return sorted(artifacts, key=lambda a: a.timestamp, reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +223,66 @@ def write_debug_index(game_dir: Path) -> Path:
         "</style>",
         "</head>",
         "<body>",
-        "<h1>reeln Debug Index</h1>",
+        "<h1>"
+        "<img src='https://raw.githubusercontent.com/StreamnDad/reeln-cli/main/assets/logo.jpg'"
+        " alt='reeln' style='height:48px;vertical-align:middle;margin-right:12px;border-radius:6px;'>"
+        "reeln Debug Index</h1>",
         f"<p>Game directory: <code>{html.escape(str(game_dir))}</code></p>",
         f"<p>Generated: {html.escape(datetime.now(tz=UTC).isoformat())}</p>",
     ]
+
+    # Zoom debug section (if zoom/ subdirectory exists)
+    zoom_dir = d / "zoom"
+    if zoom_dir.is_dir():
+        lines.append("<div class='section'>")
+        lines.append("<h2>Smart Zoom Debug</h2>")
+
+        # Plugin debug (prompts, model info)
+        plugin_debug_json = zoom_dir / "plugin_debug.json"
+        if plugin_debug_json.is_file():
+            try:
+                plugin_data = json.loads(plugin_debug_json.read_text(encoding="utf-8"))
+                lines.append("<p><strong>Plugin debug data:</strong></p>")
+                lines.append(f"<pre>{html.escape(json.dumps(plugin_data, indent=2))}</pre>")
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Zoom path JSON link
+        zoom_json = zoom_dir / "zoom_path.json"
+        if zoom_json.is_file():
+            lines.append("<p><strong>Zoom path:</strong> <a href='zoom/zoom_path.json'>zoom_path.json</a></p>")
+
+        # Collect frame images
+        frames = sorted(zoom_dir.glob("frame_*.png"))
+        annotated = sorted(zoom_dir.glob("annotated_*.png"))
+
+        if annotated:
+            lines.append(
+                "<p><strong>Annotated frames</strong> (crosshair = detected center, green box = crop region):</p>"
+            )
+            lines.append("<div style='display:flex;flex-wrap:wrap;gap:8px;'>")
+            for img in annotated:
+                lines.append(
+                    f"<a href='zoom/{html.escape(img.name)}'>"
+                    f"<img src='zoom/{html.escape(img.name)}' "
+                    f"style='max-width:320px;border:1px solid #444;' "
+                    f"title='{html.escape(img.name)}'></a>"
+                )
+            lines.append("</div>")
+
+        if frames:
+            lines.append("<p><strong>Extracted frames:</strong></p>")
+            lines.append("<div style='display:flex;flex-wrap:wrap;gap:8px;'>")
+            for img in frames:
+                lines.append(
+                    f"<a href='zoom/{html.escape(img.name)}'>"
+                    f"<img src='zoom/{html.escape(img.name)}' "
+                    f"style='max-width:320px;border:1px solid #444;' "
+                    f"title='{html.escape(img.name)}'></a>"
+                )
+            lines.append("</div>")
+
+        lines.append("</div>")
 
     if not artifacts:
         lines.append("<p>No debug artifacts found.</p>")

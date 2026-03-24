@@ -22,11 +22,12 @@ def test_hook_values() -> None:
     assert Hook.ON_HIGHLIGHTS_MERGED.value == "on_highlights_merged"
     assert Hook.ON_SEGMENT_START.value == "on_segment_start"
     assert Hook.ON_SEGMENT_COMPLETE.value == "on_segment_complete"
+    assert Hook.ON_FRAMES_EXTRACTED.value == "on_frames_extracted"
     assert Hook.ON_ERROR.value == "on_error"
 
 
 def test_hook_enum_count() -> None:
-    assert len(Hook) == 13
+    assert len(Hook) == 14
 
 
 def test_hook_members_unique() -> None:

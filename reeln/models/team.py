@@ -7,6 +7,15 @@ from typing import Any
 
 
 @dataclass
+class RosterEntry:
+    """A single player entry from a roster CSV."""
+
+    number: str
+    name: str
+    position: str
+
+
+@dataclass
 class TeamProfile:
     """Reusable team configuration with metadata for rendering and plugins."""
 

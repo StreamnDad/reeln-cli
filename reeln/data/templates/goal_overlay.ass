@@ -9,16 +9,16 @@ PlayResY: 1080
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: BoxBorder, Inter, 1, {{ass_secondary_color}}, {{ass_secondary_color}}, {{ass_secondary_color}}, &H00000000, 0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 Style: BoxFill, Inter, 1, {{ass_primary_back}}, {{ass_primary_back}}, {{ass_primary_back}}, &H00000000, 0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
-Style: TeamLine, Inter, 22, {{ass_team_text_color}}, {{ass_team_text_color}}, {{ass_secondary_color}}, &H00000000, 0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: TeamLine, Inter, 24, {{ass_team_text_color}}, {{ass_team_text_color}}, {{ass_secondary_color}}, &H00000000, 1,0,0,0,100,100,1,0,1,0,0,7,0,0,0,1
 Style: NameLine, Inter, 46, {{ass_name_color}}, {{ass_name_color}}, {{ass_name_outline_color}}, &H00000000, 1,0,0,0,100,100,0,0,1,2,0,7,0,0,0,1
 Style: AssistLine, Inter, 30, {{ass_name_color}}, {{ass_name_color}}, {{ass_name_outline_color}}, &H00000000, 0,0,0,0,100,100,0,0,1,2,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 ; Overlay block box (x=10,y=820,w=1900,h=220) with 6px border
-Dialogue: 0,0:00:00.00,0:00:10.00,BoxBorder,,0,0,0,,{\p1\pos({{goal_overlay_border_x}},{{goal_overlay_border_y}})\bord0\shad0}m 0 0 l {{goal_overlay_border_w}} 0 l {{goal_overlay_border_w}} {{goal_overlay_border_h}} l 0 {{goal_overlay_border_h}}
-Dialogue: 1,0:00:00.00,0:00:10.00,BoxFill,,0,0,0,,{\p1\pos({{goal_overlay_box_x}},{{goal_overlay_box_y}})\bord0\shad0}m 0 0 l {{goal_overlay_box_w}} 0 l {{goal_overlay_box_w}} {{goal_overlay_box_h}} l 0 {{goal_overlay_box_h}}
-Dialogue: 2,0:00:00.00,0:00:10.00,TeamLine,,0,0,0,,{\an7\pos({{goal_overlay_team_x}},{{goal_overlay_team_y}})}{{goal_scorer_team}}  -  {{team_level}}
+Dialogue: 0,0:00:00.00,{{box_end}},BoxBorder,,0,0,0,,{\p1\pos({{goal_overlay_border_x}},{{goal_overlay_border_y}})\bord0\shad0}m 0 0 l {{goal_overlay_border_w}} 0 l {{goal_overlay_border_w}} {{goal_overlay_border_h}} l 0 {{goal_overlay_border_h}}
+Dialogue: 1,0:00:00.00,{{box_end}},BoxFill,,0,0,0,,{\p1\pos({{goal_overlay_box_x}},{{goal_overlay_box_y}})\bord0\shad0}m 0 0 l {{goal_overlay_box_w}} 0 l {{goal_overlay_box_w}} {{goal_overlay_box_h}} l 0 {{goal_overlay_box_h}}
+Dialogue: 2,0:00:00.00,{{box_end}},TeamLine,,0,0,0,,{\an7\pos({{goal_overlay_team_x}},{{goal_overlay_team_y}})}{{goal_scorer_team}}  -  {{team_level}}
 Dialogue: 3,{{scorer_start}},{{scorer_end}},NameLine,,0,0,0,,{\an7\pos({{goal_overlay_scorer_x}},{{goal_overlay_scorer_y}})\fs{{goal_scorer_fs}}}{{goal_scorer_text}}
 Dialogue: 4,{{assist_start}},{{assist_end}},AssistLine,,0,0,0,,{\an7\pos({{goal_overlay_assist_1_x}},{{goal_overlay_assist_1_y}})\fs{{goal_assist_fs}}}{{goal_assist_1}}
 Dialogue: 5,{{assist_start}},{{assist_end}},AssistLine,,0,0,0,,{\an7\pos({{goal_overlay_assist_2_x}},{{goal_overlay_assist_2_y}})\fs{{goal_assist_fs}}}{{goal_assist_2}}

@@ -267,6 +267,11 @@ class TestDoubleHeaderLifecycle:
         game_dir1, _ = init_game(tmp_path, info1)
         assert "_g" not in game_dir1.name
 
+        # Finish first game before starting second
+        from reeln.core.finish import finish_game
+
+        finish_game(game_dir1)
+
         info2 = GameInfo(
             date="2026-02-26",
             home_team="roseville",
@@ -276,7 +281,14 @@ class TestDoubleHeaderLifecycle:
         game_dir2, _ = init_game(tmp_path, info2)
         assert game_dir2.name.endswith("_g2")
 
-        # States are independent
+        # States are independent — re-init game_dir1 state for segment processing
+        from reeln.core.highlights import save_game_state
+
+        state1 = load_game_state(game_dir1)
+        state1.finished = False
+        state1.finished_at = ""
+        save_game_state(state1, game_dir1)
+
         _populate_segment(game_dir1, "hockey", 1)
         process_segment(game_dir1, 1, ffmpeg_path=_FFMPEG)
 
