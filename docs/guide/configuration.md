@@ -451,7 +451,7 @@ Team profiles are stored as JSON files in the config directory under `teams/{lev
 
 2. **Create the roster CSV** with `number`, `name`, and `position` columns:
 
-```csv
+```text
 number,name,position
 48,John Smith,C
 24,Jane Doe,D
