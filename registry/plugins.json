@@ -32,6 +32,16 @@
       "license": "AGPL-3.0"
     },
     {
+      "name": "cloudflare",
+      "package": "reeln-plugin-cloudflare",
+      "description": "Cloudflare R2 integration — video uploads to R2 with CDN URL sharing and post-game cleanup",
+      "capabilities": ["hook:POST_RENDER", "hook:ON_GAME_FINISH", "hook:ON_POST_GAME_FINISH"],
+      "homepage": "https://github.com/StreamnDad/reeln-plugin-cloudflare",
+      "min_reeln_version": "0.0.31",
+      "author": "StreamnDad",
+      "license": "AGPL-3.0"
+    },
+    {
       "name": "openai",
       "package": "reeln-plugin-openai",
       "description": "OpenAI-powered LLM integration — livestream metadata, short metadata, game thumbnails, and translation",
