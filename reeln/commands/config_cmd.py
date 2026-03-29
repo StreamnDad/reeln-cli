@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from reeln.commands import event_types_cmd
 from reeln.core.config import (
     config_to_dict,
     default_config_path,
@@ -16,6 +17,7 @@ from reeln.core.config import (
 from reeln.core.errors import ConfigError
 
 app = typer.Typer(no_args_is_help=True, help="Configuration commands.")
+app.add_typer(event_types_cmd.app, name="event-types")
 
 
 @app.command()

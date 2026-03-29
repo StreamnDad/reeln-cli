@@ -13,7 +13,7 @@ from typing import Any
 from reeln.core.errors import ConfigError
 from reeln.core.log import get_logger
 from reeln.models.branding import BrandingConfig
-from reeln.models.config import AppConfig, PathConfig, PluginsConfig, VideoConfig
+from reeln.models.config import AppConfig, EventTypeEntry, PathConfig, PluginsConfig, VideoConfig
 from reeln.models.plugin import OrchestrationConfig
 from reeln.models.profile import (
     IterationConfig,
@@ -131,20 +131,29 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
     d: dict[str, Any] = {
         "config_version": config.config_version,
         "sport": config.sport,
-        "video": {
-            "ffmpeg_path": config.video.ffmpeg_path,
-            "codec": config.video.codec,
-            "preset": config.video.preset,
-            "crf": config.video.crf,
-            "audio_codec": config.video.audio_codec,
-            "audio_bitrate": config.video.audio_bitrate,
-        },
-        "paths": {
-            "source_dir": str(config.paths.source_dir) if config.paths.source_dir else None,
-            "source_glob": config.paths.source_glob,
-            "output_dir": str(config.paths.output_dir) if config.paths.output_dir else None,
-            "temp_dir": str(config.paths.temp_dir) if config.paths.temp_dir else None,
-        },
+    }
+
+    if full or config.event_types:
+        d["event_types"] = [
+            {"name": et.name, "team_specific": et.team_specific}
+            if et.team_specific
+            else et.name
+            for et in config.event_types
+        ]
+
+    d["video"] = {
+        "ffmpeg_path": config.video.ffmpeg_path,
+        "codec": config.video.codec,
+        "preset": config.video.preset,
+        "crf": config.video.crf,
+        "audio_codec": config.video.audio_codec,
+        "audio_bitrate": config.video.audio_bitrate,
+    }
+    d["paths"] = {
+        "source_dir": str(config.paths.source_dir) if config.paths.source_dir else None,
+        "source_glob": config.paths.source_glob,
+        "output_dir": str(config.paths.output_dir) if config.paths.output_dir else None,
+        "temp_dir": str(config.paths.temp_dir) if config.paths.temp_dir else None,
     }
 
     has_branding = (
@@ -266,9 +275,25 @@ def dict_to_config(data: dict[str, Any]) -> AppConfig:
             duration=float(raw_branding.get("duration", 5.0)),
         )
 
+    # Event types
+    raw_event_types = data.get("event_types", [])
+    event_types: list[EventTypeEntry] = []
+    if isinstance(raw_event_types, list):
+        for item in raw_event_types:
+            if isinstance(item, str):
+                event_types.append(EventTypeEntry(name=item))
+            elif isinstance(item, dict) and "name" in item:
+                event_types.append(
+                    EventTypeEntry(
+                        name=str(item["name"]),
+                        team_specific=bool(item.get("team_specific", False)),
+                    )
+                )
+
     return AppConfig(
         config_version=int(data.get("config_version", CURRENT_CONFIG_VERSION)),
         sport=str(data.get("sport", "generic")),
+        event_types=event_types,
         video=_dict_to_video_config(data.get("video", {})),
         paths=_dict_to_path_config(data.get("paths", {})),
         render_profiles=profiles,
@@ -377,6 +402,28 @@ def validate_config(data: dict[str, Any]) -> list[str]:
     plugins = data.get("plugins")
     if plugins is not None and not isinstance(plugins, dict):
         issues.append("'plugins' section must be a dict")
+
+    event_types = data.get("event_types")
+    if event_types is not None:
+        if not isinstance(event_types, list):
+            issues.append("'event_types' must be a list")
+        else:
+            for i, t in enumerate(event_types):
+                if not isinstance(t, str):
+                    issues.append(f"event_types[{i}] must be a string")
+
+    # Cross-validate: iterations referencing types not in event_types
+    if isinstance(event_types, list) and event_types:
+        type_set = {str(t) for t in event_types if isinstance(t, str)}
+        iter_data = data.get("iterations")
+        if isinstance(iter_data, dict):
+            mappings = iter_data.get("mappings", iter_data)
+            if isinstance(mappings, dict):
+                for key in mappings:
+                    if key != "default" and key not in type_set:
+                        issues.append(
+                            f"iterations references type '{key}' not listed in event_types"
+                        )
 
     return issues
 

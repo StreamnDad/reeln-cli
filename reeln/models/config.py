@@ -45,11 +45,20 @@ class PluginsConfig:
 
 
 @dataclass
+class EventTypeEntry:
+    """A configured event type with optional team-specific flag."""
+
+    name: str
+    team_specific: bool = False
+
+
+@dataclass
 class AppConfig:
     """Top-level application configuration."""
 
     config_version: int = 1
     sport: str = "generic"
+    event_types: list[EventTypeEntry] = field(default_factory=list)
     video: VideoConfig = field(default_factory=VideoConfig)
     paths: PathConfig = field(default_factory=PathConfig)
     render_profiles: dict[str, RenderProfile] = field(default_factory=dict)
