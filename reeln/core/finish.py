@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from reeln.core.errors import MediaError
@@ -36,7 +36,7 @@ def finish_game(
         raise MediaError("Game is already finished")
 
     state.finished = True
-    state.finished_at = datetime.now(UTC).isoformat()
+    state.finished_at = datetime.now(timezone.utc).isoformat()
 
     if not dry_run:
         _relocated, reloc_messages = relocate_outputs(game_dir, state)

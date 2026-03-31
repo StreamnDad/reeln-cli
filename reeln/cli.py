@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -69,7 +70,7 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    version: bool | None = typer.Option(
+    version: Optional[bool] = typer.Option(
         None,
         "--version",
         help="Show version and exit.",
@@ -111,8 +112,8 @@ def main(
 
 @app.command()
 def doctor(
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Run health checks: ffmpeg, config, permissions, plugins."""
     from reeln.core.config import load_config

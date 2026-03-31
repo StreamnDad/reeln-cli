@@ -7,7 +7,7 @@ import html
 import json
 import logging
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -117,7 +117,7 @@ def build_debug_artifact(
 
     return DebugArtifact(
         operation=operation,
-        timestamp=datetime.now(tz=UTC).isoformat(),
+        timestamp=datetime.now(tz=timezone.utc).isoformat(),
         ffmpeg_command=list(ffmpeg_command),
         filter_complex=_extract_filter_complex(ffmpeg_command),
         input_files=[_rel(f) for f in input_files],
@@ -228,7 +228,7 @@ def write_debug_index(game_dir: Path) -> Path:
         " alt='reeln' style='height:48px;vertical-align:middle;margin-right:12px;border-radius:6px;'>"
         "reeln Debug Index</h1>",
         f"<p>Game directory: <code>{html.escape(str(game_dir))}</code></p>",
-        f"<p>Generated: {html.escape(datetime.now(tz=UTC).isoformat())}</p>",
+        f"<p>Generated: {html.escape(datetime.now(tz=timezone.utc).isoformat())}</p>",
     ]
 
     # Zoom debug section (if zoom/ subdirectory exists)

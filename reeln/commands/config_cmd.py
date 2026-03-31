@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -20,8 +21,8 @@ app = typer.Typer(no_args_is_help=True, help="Configuration commands.")
 
 @app.command()
 def show(
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    path: Path | None = typer.Option(None, "--path", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    path: Optional[Path] = typer.Option(None, "--path", help="Explicit config file path."),
 ) -> None:
     """Display current configuration."""
     try:
@@ -35,8 +36,8 @@ def show(
 
 @app.command()
 def doctor(
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    path: Path | None = typer.Option(None, "--path", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    path: Optional[Path] = typer.Option(None, "--path", help="Explicit config file path."),
 ) -> None:
     """Validate configuration, warn on issues."""
     try:

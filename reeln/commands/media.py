@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -14,10 +15,10 @@ app = typer.Typer(no_args_is_help=True, help="Media management commands.")
 
 @app.command()
 def prune(
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Base directory to scan for games."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Base directory to scan for games."),
     all_files: bool = typer.Option(False, "--all", help="Also remove raw event clips."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed."),
 ) -> None:
     """Remove generated artifacts from all finished games."""

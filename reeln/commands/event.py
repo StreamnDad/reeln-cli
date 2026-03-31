@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -22,12 +23,12 @@ def _resolve_game_dir(output_dir: Path | None, config_output_dir: Path | None) -
 
 @app.command("list")
 def list_cmd(
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
-    segment: int | None = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
-    event_type: str | None = typer.Option(None, "--type", "-t", help="Filter by event type."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    segment: Optional[int] = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
+    event_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by event type."),
     untagged: bool = typer.Option(False, "--untagged", help="Show only untagged events."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """List registered events in the current game."""
     from reeln.core.events import list_events
@@ -68,12 +69,12 @@ def list_cmd(
 @app.command()
 def tag(
     event_id: str = typer.Argument(..., help="Event ID (or prefix)."),
-    event_type: str | None = typer.Option(None, "--type", "-t", help="Event type (e.g. goal, save)."),
-    player: str | None = typer.Option(None, "--player", "-p", help="Player name/number."),
-    meta: list[str] | None = typer.Option(None, "--meta", "-m", help="Metadata key=value pair."),
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    event_type: Optional[str] = typer.Option(None, "--type", "-t", help="Event type (e.g. goal, save)."),
+    player: Optional[str] = typer.Option(None, "--player", "-p", help="Player name/number."),
+    meta: Optional[list[str]] = typer.Option(None, "--meta", "-m", help="Metadata key=value pair."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Tag an event with type, player, and metadata."""
     from reeln.core.events import tag_event
@@ -126,11 +127,11 @@ def tag(
 @app.command("tag-all")
 def tag_all(
     segment_number: int = typer.Argument(..., help="Segment number."),
-    event_type: str | None = typer.Option(None, "--type", "-t", help="Event type."),
-    player: str | None = typer.Option(None, "--player", "-p", help="Player name/number."),
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    event_type: Optional[str] = typer.Option(None, "--type", "-t", help="Event type."),
+    player: Optional[str] = typer.Option(None, "--player", "-p", help="Player name/number."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Bulk-tag all events in a segment."""
     from reeln.core.events import tag_events_in_segment

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import typer
 
@@ -159,7 +159,7 @@ def _record_render(
         segment_number=segment_number,
         format=f"{width}x{height}",
         crop_mode=crop_mode.value,
-        rendered_at=datetime.now(tz=UTC).isoformat(),
+        rendered_at=datetime.now(tz=timezone.utc).isoformat(),
         event_id=resolved_event_id,
     )
     state.renders.append(entry)
@@ -765,39 +765,41 @@ def _do_short(
 
 @app.command()
 def short(
-    clip: Path | None = typer.Argument(None, help="Input video file. Default: latest in cwd."),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path."),
-    fmt: str | None = typer.Option(None, "--format", "-f", help="Output format: vertical, square."),
-    size: str | None = typer.Option(None, "--size", help="Custom WxH (e.g., 1080x1920)."),
+    clip: Optional[Path] = typer.Argument(None, help="Input video file. Default: latest in cwd."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path."),
+    fmt: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: vertical, square."),
+    size: Optional[str] = typer.Option(None, "--size", help="Custom WxH (e.g., 1080x1920)."),
     crop: str = typer.Option("pad", "--crop", "-c", help="Crop mode: pad, crop, smart, smart_pad."),
     anchor: str = typer.Option("center", "--anchor", "-a", help="Crop anchor: center/top/bottom/left/right or x,y."),
     pad_color: str = typer.Option("black", "--pad-color", help="Pad bar color."),
     speed: float = typer.Option(1.0, "--speed", help="Playback speed (0.5-2.0)."),
     scale: float = typer.Option(1.0, "--scale", help="Content scale (0.5-3.0). >1.0 zooms in."),
     smart: bool = typer.Option(False, "--smart", help="Smart tracking via vision plugin."),
-    lut: Path | None = typer.Option(None, "--lut", help="LUT file (.cube/.3dl)."),
-    subtitle: Path | None = typer.Option(None, "--subtitle", help="ASS subtitle file."),
-    game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
-    event: str | None = typer.Option(None, "--event", help="Link to event ID (auto-detected if omitted)."),
-    render_profile: str | None = typer.Option(None, "--render-profile", "-r", help="Named render profile from config."),
-    player_name: str | None = typer.Option(None, "--player", help="Player name for overlay."),
-    assists_str: str | None = typer.Option(None, "--assists", help="Assists, comma-separated."),
-    player_numbers_str: str | None = typer.Option(
+    lut: Optional[Path] = typer.Option(None, "--lut", help="LUT file (.cube/.3dl)."),
+    subtitle: Optional[Path] = typer.Option(None, "--subtitle", help="ASS subtitle file."),
+    game_dir: Optional[Path] = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
+    event: Optional[str] = typer.Option(None, "--event", help="Link to event ID (auto-detected if omitted)."),
+    render_profile: Optional[str] = typer.Option(
+        None, "--render-profile", "-r", help="Named render profile from config."
+    ),
+    player_name: Optional[str] = typer.Option(None, "--player", help="Player name for overlay."),
+    assists_str: Optional[str] = typer.Option(None, "--assists", help="Assists, comma-separated."),
+    player_numbers_str: Optional[str] = typer.Option(
         None,
         "--player-numbers",
         "-n",
         help="Jersey numbers: scorer[,assist1[,assist2]]. Looked up from team roster.",
     ),
-    event_type: str | None = typer.Option(
+    event_type: Optional[str] = typer.Option(
         None,
         "--event-type",
         help="Event type for scoring team resolution (HOME_GOAL, AWAY_GOAL).",
     ),
-    zoom_frames: int | None = typer.Option(
+    zoom_frames: Optional[int] = typer.Option(
         None, "--zoom-frames", help="Number of frames to extract for smart zoom (1-20)."
     ),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     no_branding: bool = typer.Option(False, "--no-branding", help="Disable branding overlay."),
@@ -837,38 +839,40 @@ def short(
 
 @app.command()
 def preview(
-    clip: Path | None = typer.Argument(None, help="Input video file. Default: latest in cwd."),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path."),
-    fmt: str | None = typer.Option(None, "--format", "-f", help="Output format: vertical, square."),
-    size: str | None = typer.Option(None, "--size", help="Custom WxH (e.g., 1080x1920)."),
+    clip: Optional[Path] = typer.Argument(None, help="Input video file. Default: latest in cwd."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path."),
+    fmt: Optional[str] = typer.Option(None, "--format", "-f", help="Output format: vertical, square."),
+    size: Optional[str] = typer.Option(None, "--size", help="Custom WxH (e.g., 1080x1920)."),
     crop: str = typer.Option("pad", "--crop", "-c", help="Crop mode: pad, crop, smart, smart_pad."),
     anchor: str = typer.Option("center", "--anchor", "-a", help="Crop anchor: center/top/bottom/left/right or x,y."),
     pad_color: str = typer.Option("black", "--pad-color", help="Pad bar color."),
     speed: float = typer.Option(1.0, "--speed", help="Playback speed (0.5-2.0)."),
     scale: float = typer.Option(1.0, "--scale", help="Content scale (0.5-3.0). >1.0 zooms in."),
     smart: bool = typer.Option(False, "--smart", help="Smart tracking via vision plugin."),
-    lut: Path | None = typer.Option(None, "--lut", help="LUT file (.cube/.3dl)."),
-    subtitle: Path | None = typer.Option(None, "--subtitle", help="ASS subtitle file."),
-    game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
-    render_profile: str | None = typer.Option(None, "--render-profile", "-r", help="Named render profile from config."),
-    player_name: str | None = typer.Option(None, "--player", help="Player name for overlay."),
-    assists_str: str | None = typer.Option(None, "--assists", help="Assists, comma-separated."),
-    player_numbers_str: str | None = typer.Option(
+    lut: Optional[Path] = typer.Option(None, "--lut", help="LUT file (.cube/.3dl)."),
+    subtitle: Optional[Path] = typer.Option(None, "--subtitle", help="ASS subtitle file."),
+    game_dir: Optional[Path] = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
+    render_profile: Optional[str] = typer.Option(
+        None, "--render-profile", "-r", help="Named render profile from config."
+    ),
+    player_name: Optional[str] = typer.Option(None, "--player", help="Player name for overlay."),
+    assists_str: Optional[str] = typer.Option(None, "--assists", help="Assists, comma-separated."),
+    player_numbers_str: Optional[str] = typer.Option(
         None,
         "--player-numbers",
         "-n",
         help="Jersey numbers: scorer[,assist1[,assist2]]. Looked up from team roster.",
     ),
-    event_type: str | None = typer.Option(
+    event_type: Optional[str] = typer.Option(
         None,
         "--event-type",
         help="Event type for scoring team resolution (HOME_GOAL, AWAY_GOAL).",
     ),
-    zoom_frames: int | None = typer.Option(
+    zoom_frames: Optional[int] = typer.Option(
         None, "--zoom-frames", help="Number of frames to extract for smart zoom (1-20)."
     ),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     no_branding: bool = typer.Option(False, "--no-branding", help="Disable branding overlay."),
@@ -908,11 +912,11 @@ def preview(
 @app.command()
 def reel(
     game_dir: Path = typer.Option(..., "--game-dir", help="Game directory."),
-    segment_number: int | None = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
-    event_type: str | None = typer.Option(None, "--event-type", help="Filter by linked event type."),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    segment_number: Optional[int] = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
+    event_type: Optional[str] = typer.Option(None, "--event-type", help="Filter by linked event type."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
 ) -> None:
     """Assemble rendered shorts into a concatenated reel."""
@@ -1007,20 +1011,20 @@ def reel(
 def apply_profile(
     clip: Path = typer.Argument(..., help="Input video file."),
     render_profile: str = typer.Option(..., "--render-profile", "-r", help="Named render profile from config."),
-    output: Path | None = typer.Option(None, "--output", "-o", help="Output file path."),
-    game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for template context."),
-    event: str | None = typer.Option(None, "--event", help="Event ID for template context."),
-    player_name: str | None = typer.Option(None, "--player", help="Player name for overlay."),
-    assists_str: str | None = typer.Option(None, "--assists", help="Assists, comma-separated."),
-    player_numbers_str: str | None = typer.Option(
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file path."),
+    game_dir: Optional[Path] = typer.Option(None, "--game-dir", help="Game directory for template context."),
+    event: Optional[str] = typer.Option(None, "--event", help="Event ID for template context."),
+    player_name: Optional[str] = typer.Option(None, "--player", help="Player name for overlay."),
+    assists_str: Optional[str] = typer.Option(None, "--assists", help="Assists, comma-separated."),
+    player_numbers_str: Optional[str] = typer.Option(
         None,
         "--player-numbers",
         "-n",
         help="Jersey numbers: scorer[,assist1[,assist2]]. Looked up from team roster.",
     ),
-    event_type: str | None = typer.Option(None, "--event-type", help="Event type for scoring team resolution."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    event_type: Optional[str] = typer.Option(None, "--event-type", help="Event type for scoring team resolution."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),

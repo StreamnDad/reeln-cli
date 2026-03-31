@@ -7,7 +7,7 @@ import json
 import logging
 import shutil
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +102,7 @@ def create_game_directory(base_dir: Path, game_info: GameInfo) -> Path:
     # Write initial game state
     state = GameState(
         game_info=game_info,
-        created_at=datetime.now(tz=UTC).isoformat(),
+        created_at=datetime.now(tz=timezone.utc).isoformat(),
     )
     save_game_state(state, game_dir)
 
@@ -359,7 +359,7 @@ def create_events_for_segment(
 
     registry = get_registry()
 
-    now = datetime.now(tz=UTC).isoformat()
+    now = datetime.now(tz=timezone.utc).isoformat()
     events: list[GameEvent] = []
     for video in video_files:
         rel_path = str(video.relative_to(game_dir)) if video.is_relative_to(game_dir) else str(video)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 import typer
 
@@ -130,20 +131,20 @@ def _apply_iterations_post(
 
 @app.command()
 def init(
-    home: str | None = typer.Argument(None, help="Home team name."),
-    away: str | None = typer.Argument(None, help="Away team name."),
+    home: Optional[str] = typer.Argument(None, help="Home team name."),
+    away: Optional[str] = typer.Argument(None, help="Away team name."),
     sport: str = typer.Option("generic", "--sport", "-s", help="Sport type."),
-    game_date: str | None = typer.Option(None, "--date", help="Game date YYYY-MM-DD. Default: today."),
+    game_date: Optional[str] = typer.Option(None, "--date", help="Game date YYYY-MM-DD. Default: today."),
     venue: str = typer.Option("", "--venue", help="Venue name."),
     game_time: str = typer.Option("", "--game-time", "-t", help="Game time (e.g. '7:00 PM')."),
-    level: str | None = typer.Option(None, "--level", "-l", help="Team level for profile lookup."),
+    level: Optional[str] = typer.Option(None, "--level", "-l", help="Team level for profile lookup."),
     period_length: int = typer.Option(0, "--period-length", help="Period/segment length in minutes (0 = not set)."),
     description: str = typer.Option("", "--description", "-d", help="Broadcast description."),
     thumbnail: str = typer.Option("", "--thumbnail", help="Thumbnail image file path."),
     tournament: str = typer.Option("", "--tournament", help="Tournament name (optional context for plugins)."),
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Base output directory."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Base output directory."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without creating."),
 ) -> None:
     """Initialize a new game workspace."""
@@ -253,15 +254,15 @@ def init(
 @app.command()
 def segment(
     number: int = typer.Argument(..., help="Segment number (1-indexed)."),
-    output_dir: Path | None = typer.Option(
+    output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", "-o", help="Game directory (default: current directory)."
     ),
-    render_profile: str | None = typer.Option(
+    render_profile: Optional[str] = typer.Option(
         None, "--render-profile", "-r", help="Apply a named render profile after merge."
     ),
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     debug: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without merging."),
 ) -> None:
@@ -323,15 +324,15 @@ def segment(
 
 @app.command()
 def highlights(
-    output_dir: Path | None = typer.Option(
+    output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", "-o", help="Game directory (default: current directory)."
     ),
-    render_profile: str | None = typer.Option(
+    render_profile: Optional[str] = typer.Option(
         None, "--render-profile", "-r", help="Apply a named render profile after merge."
     ),
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     debug: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without merging."),
 ) -> None:
@@ -390,13 +391,13 @@ def highlights(
 
 @app.command()
 def compile(
-    event_type: str | None = typer.Option(None, "--type", "-t", help="Filter by event type."),
-    segment_number: int | None = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
-    player: str | None = typer.Option(None, "--player", "-p", help="Filter by player."),
-    output: Path | None = typer.Option(None, "--output", help="Output file path."),
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    event_type: Optional[str] = typer.Option(None, "--type", "-t", help="Filter by event type."),
+    segment_number: Optional[int] = typer.Option(None, "--segment", "-s", help="Filter by segment number."),
+    player: Optional[str] = typer.Option(None, "--player", "-p", help="Filter by player."),
+    output: Optional[Path] = typer.Option(None, "--output", help="Output file path."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     debug: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without compiling."),
 ) -> None:
@@ -451,9 +452,9 @@ def compile(
 
 @app.command()
 def finish(
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview without updating state."),
 ) -> None:
     """Finalize a game — mark as finished and show summary."""
@@ -481,10 +482,10 @@ def finish(
 
 @app.command()
 def prune(
-    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", "-o", help="Game directory."),
     all_files: bool = typer.Option(False, "--all", help="Also remove raw event clips."),
-    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed."),
 ) -> None:
     """Remove generated artifacts from a finished game."""

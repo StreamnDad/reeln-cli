@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Platform-agnostic CLI toolkit for livestreamers"
 readme = "README.md"
 license = "AGPL-3.0-only"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "typer>=0.12.3",
     "filelock>=3.0",
@@ -49,16 +49,19 @@ reeln = "reeln.cli:app"
 path = "reeln/__init__.py"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py39"
 line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["B008"]  # typer.Option() in function defaults is the standard Typer pattern
+ignore = [
+    "B008",   # typer.Option() in function defaults is the standard Typer pattern
+    "UP045",  # Optional[X] needed in Typer commands for Python 3.9 runtime compatibility
+]
 
 [tool.mypy]
 strict = true
-python_version = "3.11"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 
