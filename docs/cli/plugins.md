@@ -251,3 +251,62 @@ Per-plugin settings can be provided in the config file:
   }
 }
 ```
+
+## Desktop UI contributions
+
+Plugins can declare UI fields that appear in the **reeln-dock** desktop application.
+Add a `ui_contributions` object to your plugin's registry entry in `registry/plugins.json`.
+
+Fields only appear when the plugin is installed and enabled. When disabled, the fields
+disappear from the UI automatically.
+
+### Supported screens
+
+| Screen | Where fields appear |
+|--------|-------------------|
+| `render_options` | Render overrides section in Clip Review |
+| `settings` | Plugin Defaults section in Settings > Rendering |
+| `clip_review` | Clip Review metadata section |
+
+### Field types
+
+| Type | Renders as |
+|------|-----------|
+| `boolean` | Checkbox |
+| `number` | Range slider (if `min`/`max` set) or number input |
+| `string` | Text input |
+| `select` | Dropdown (requires `options: [{value, label}]`) |
+
+### Example
+
+```json
+{
+  "name": "openai",
+  "ui_contributions": {
+    "render_options": {
+      "fields": [
+        {
+          "id": "smart",
+          "label": "Smart Zoom",
+          "type": "boolean",
+          "default": false,
+          "description": "AI-powered smart crop tracking",
+          "maps_to": "smart"
+        },
+        {
+          "id": "zoom_frames",
+          "label": "Zoom Frames",
+          "type": "number",
+          "min": 1,
+          "max": 30,
+          "step": 1,
+          "maps_to": "zoom_frames"
+        }
+      ]
+    }
+  }
+}
+```
+
+The `maps_to` property controls which `RenderOverrides` key the field value flows into.
+If omitted, the field `id` is used as the key.
