@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from reeln.core.config import load_config
-from reeln.core.errors import ReelnError
+from reeln.core.errors import ReelnError, RenderError
 from reeln.core.shorts import plan_preview, plan_short
 from reeln.models.short import (
     ANCHOR_POSITIONS,
@@ -366,8 +366,9 @@ def _do_short(
 
     # Apply render profile overlay if specified
     rendered_subtitle: Path | None = None
+    png_overlay: Path | None = None
     if render_profile_name is not None:
-        from reeln.core.profiles import resolve_subtitle_for_profile
+        from reeln.core.profiles import resolve_overlay_for_profile
         from reeln.core.templates import build_base_context
 
         try:
@@ -402,11 +403,10 @@ def _do_short(
                 event_meta["assists"] = assists
 
             if event_meta is not None:
-                from reeln.core.ffmpeg import discover_ffmpeg as _disc
                 from reeln.core.ffmpeg import probe_duration as _probe_dur
                 from reeln.core.overlay import build_overlay_context
 
-                dur = _probe_dur(_disc(), clip) or 10.0
+                dur = _probe_dur(clip) or 10.0
                 ctx = build_overlay_context(
                     ctx,
                     duration=dur,
@@ -416,7 +416,12 @@ def _do_short(
 
             subtitle_dir = (output or _default_output(clip, "_short")).parent
             subtitle_dir.mkdir(parents=True, exist_ok=True)
-            rendered_subtitle = resolve_subtitle_for_profile(rp, ctx, subtitle_dir)
+            overlay = resolve_overlay_for_profile(rp, ctx, subtitle_dir)
+            if overlay is not None:
+                if overlay.is_png:
+                    png_overlay = overlay.path
+                else:
+                    rendered_subtitle = overlay.path
 
         short_config = apply_profile_to_short(short_config, rp, rendered_subtitle=rendered_subtitle)
 
@@ -500,6 +505,11 @@ def _do_short(
 
             smart_zoom_data = shared.get("smart_zoom")
             if isinstance(smart_zoom_data, dict):
+                zoom_error = smart_zoom_data.get("error")
+                if zoom_error is not None:
+                    raise RenderError(
+                        f"Smart zoom analysis failed after retries: {zoom_error}"
+                    )
                 zoom_path = smart_zoom_data.get("zoom_path")
                 debug_from_plugin = smart_zoom_data.get("debug")
                 if isinstance(debug_from_plugin, dict):
@@ -670,6 +680,18 @@ def _do_short(
         except ReelnError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
+
+        # PNG overlay compositing (post-render step)
+        if png_overlay is not None:
+            from reeln.core.ffmpeg import composite_video_overlay
+
+            composited = out.with_stem(f"{out.stem}_comp")
+            try:
+                composite_video_overlay(out, png_overlay, composited)
+                out.unlink(missing_ok=True)
+                composited.rename(out)
+            finally:
+                png_overlay.unlink(missing_ok=True)
 
         _post_data: dict[str, Any] = {"plan": plan, "result": result}
         if render_game_info is not None:
@@ -916,12 +938,7 @@ def reel(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
 ) -> None:
     """Assemble rendered shorts into a concatenated reel."""
-    from reeln.core.ffmpeg import (
-        build_concat_command,
-        discover_ffmpeg,
-        run_ffmpeg,
-        write_concat_file,
-    )
+    from reeln.core.ffmpeg import concat_files
     from reeln.core.highlights import load_game_state
     from reeln.core.segment import segment_dir_name
 
@@ -981,21 +998,14 @@ def reel(
         return
 
     try:
-        ffmpeg_path = discover_ffmpeg()
-        concat_file = write_concat_file(files, game_dir)
-        try:
-            cmd = build_concat_command(
-                ffmpeg_path,
-                concat_file,
-                out,
-                copy=copy,
-                video_codec=config.video.codec,
-                crf=config.video.crf,
-                audio_codec=config.video.audio_codec,
-            )
-            run_ffmpeg(cmd)
-        finally:
-            concat_file.unlink(missing_ok=True)
+        concat_files(
+            files,
+            out,
+            copy=copy,
+            video_codec=config.video.codec,
+            crf=config.video.crf,
+            audio_codec=config.video.audio_codec,
+        )
     except ReelnError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -1028,8 +1038,8 @@ def apply_profile(
     """Apply a named render profile to a clip (full-frame, no crop/scale)."""
     from reeln.core.profiles import (
         plan_full_frame,
+        resolve_overlay_for_profile,
         resolve_profile,
-        resolve_subtitle_for_profile,
     )
     from reeln.core.templates import build_base_context
 
@@ -1119,6 +1129,7 @@ def apply_profile(
         raise typer.Exit(code=1) from exc
 
     rendered_subtitle: Path | None = None
+    apply_png_overlay: Path | None = None
     try:
         if rp.subtitle_template is not None:
             ctx = (
@@ -1134,11 +1145,10 @@ def apply_profile(
                 event_meta["assists"] = assists_str
 
             if event_meta is not None:
-                from reeln.core.ffmpeg import discover_ffmpeg as _disc
                 from reeln.core.ffmpeg import probe_duration as _probe_dur
                 from reeln.core.overlay import build_overlay_context
 
-                dur = _probe_dur(_disc(), clip) or 10.0
+                dur = _probe_dur(clip) or 10.0
                 ctx = build_overlay_context(
                     ctx,
                     duration=dur,
@@ -1146,7 +1156,12 @@ def apply_profile(
                     scoring_team=_scoring_team_name,
                 )
             out.parent.mkdir(parents=True, exist_ok=True)
-            rendered_subtitle = resolve_subtitle_for_profile(rp, ctx, out.parent)
+            overlay = resolve_overlay_for_profile(rp, ctx, out.parent)
+            if overlay is not None:
+                if overlay.is_png:
+                    apply_png_overlay = overlay.path
+                else:
+                    rendered_subtitle = overlay.path
 
         try:
             plan = plan_full_frame(clip, out, rp, config, rendered_subtitle=rendered_subtitle)
@@ -1161,8 +1176,8 @@ def apply_profile(
             typer.echo(f"Speed: {rp.speed}x")
         if rp.lut is not None:
             typer.echo(f"LUT: {rp.lut}")
-        if rendered_subtitle is not None:
-            typer.echo(f"Subtitle: {rp.subtitle_template}")
+        if rendered_subtitle is not None or apply_png_overlay is not None:
+            typer.echo(f"Overlay: {rp.subtitle_template}")
 
         if dry_run:
             typer.echo("Dry run — no files written")
@@ -1186,6 +1201,18 @@ def apply_profile(
         except ReelnError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
+
+        # PNG overlay compositing (post-render step)
+        if apply_png_overlay is not None:
+            from reeln.core.ffmpeg import composite_video_overlay
+
+            composited = out.with_stem(f"{out.stem}_comp")
+            try:
+                composite_video_overlay(out, apply_png_overlay, composited)
+                out.unlink(missing_ok=True)
+                composited.rename(out)
+            finally:
+                apply_png_overlay.unlink(missing_ok=True)
 
         _apply_post: dict[str, Any] = {"plan": plan, "result": result}
         if apply_game_info is not None:
