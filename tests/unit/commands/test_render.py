@@ -1359,7 +1359,7 @@ def test_apply_player_flag_without_game_dir(tmp_path: Path) -> None:
             ],
         )
     assert result.exit_code == 0
-    assert "Subtitle:" in result.output
+    assert "Overlay:" in result.output
 
 
 def test_apply_player_flag_overrides_event(tmp_path: Path) -> None:
@@ -1419,7 +1419,7 @@ def test_apply_player_flag_overrides_event(tmp_path: Path) -> None:
             ],
         )
     assert result.exit_code == 0
-    assert "Subtitle:" in result.output
+    assert "Overlay:" in result.output
 
 
 def test_short_subtitle_temp_cleanup_after_render(tmp_path: Path) -> None:
@@ -1533,7 +1533,7 @@ def test_apply_subtitle_without_game_info_uses_empty_context(tmp_path: Path) -> 
         ],
     )
     assert result.exit_code == 0
-    assert "Subtitle:" in result.output
+    assert "Overlay:" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -2463,7 +2463,7 @@ def test_render_apply_with_game_dir_and_subtitle(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0
-    assert "Subtitle:" in result.output
+    assert "Overlay:" in result.output
 
 
 def test_render_apply_with_event_context(tmp_path: Path) -> None:
@@ -2525,7 +2525,7 @@ def test_render_apply_with_event_context(tmp_path: Path) -> None:
             ],
         )
     assert result.exit_code == 0
-    assert "Subtitle:" in result.output
+    assert "Overlay:" in result.output
 
 
 def test_render_apply_game_dir_not_found_nonfatal(tmp_path: Path) -> None:
@@ -3788,6 +3788,57 @@ def test_render_short_smart_crop_with_zoom_path(tmp_path: Path) -> None:
     assert "Smart zoom: 2 target points" in result.output
     assert "Crop mode: smart" in result.output
     assert "Dry run" in result.output
+
+
+def test_render_short_smart_crop_plugin_zoom_error(tmp_path: Path) -> None:
+    """Smart zoom error from plugin raises RenderError and exits 1."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    from reeln.models.zoom import ExtractedFrames
+    from reeln.plugins.hooks import Hook
+    from reeln.plugins.registry import get_registry
+
+    frames = ExtractedFrames(
+        frame_paths=(tmp_path / "f.png",),
+        timestamps=(5.0,),
+        source_width=1920,
+        source_height=1080,
+        duration=10.0,
+        fps=60.0,
+    )
+
+    def _provide_error(context: object) -> None:
+        from reeln.plugins.hooks import HookContext
+
+        assert isinstance(context, HookContext)
+        context.shared["smart_zoom"] = {"error": "vision API timed out"}
+
+    def _activate_with_error_handler(plugins_config: object) -> dict[str, object]:
+        get_registry().register(Hook.ON_FRAMES_EXTRACTED, _provide_error)
+        return {}
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.commands.render.activate_plugins", side_effect=_activate_with_error_handler),
+    ):
+        mock_renderer_cls.return_value.extract_frames.return_value = frames
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--crop",
+                "crop",
+                "--smart",
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert result.exception is not None
+    assert "Smart zoom analysis failed" in str(result.exception)
 
 
 def test_render_short_smart_crop_extract_error(tmp_path: Path) -> None:

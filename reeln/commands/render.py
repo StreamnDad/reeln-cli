@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from reeln.core.config import load_config
-from reeln.core.errors import ReelnError
+from reeln.core.errors import ReelnError, RenderError
 from reeln.core.shorts import plan_preview, plan_short
 from reeln.models.short import (
     ANCHOR_POSITIONS,
@@ -402,11 +402,10 @@ def _do_short(
                 event_meta["assists"] = assists
 
             if event_meta is not None:
-                from reeln.core.ffmpeg import discover_ffmpeg as _disc
                 from reeln.core.ffmpeg import probe_duration as _probe_dur
                 from reeln.core.overlay import build_overlay_context
 
-                dur = _probe_dur(_disc(), clip) or 10.0
+                dur = _probe_dur(clip) or 10.0
                 ctx = build_overlay_context(
                     ctx,
                     duration=dur,
@@ -500,6 +499,11 @@ def _do_short(
 
             smart_zoom_data = shared.get("smart_zoom")
             if isinstance(smart_zoom_data, dict):
+                zoom_error = smart_zoom_data.get("error")
+                if zoom_error is not None:
+                    raise RenderError(
+                        f"Smart zoom analysis failed after retries: {zoom_error}"
+                    )
                 zoom_path = smart_zoom_data.get("zoom_path")
                 debug_from_plugin = smart_zoom_data.get("debug")
                 if isinstance(debug_from_plugin, dict):
@@ -916,12 +920,7 @@ def reel(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
 ) -> None:
     """Assemble rendered shorts into a concatenated reel."""
-    from reeln.core.ffmpeg import (
-        build_concat_command,
-        discover_ffmpeg,
-        run_ffmpeg,
-        write_concat_file,
-    )
+    from reeln.core.ffmpeg import concat_files
     from reeln.core.highlights import load_game_state
     from reeln.core.segment import segment_dir_name
 
@@ -981,21 +980,14 @@ def reel(
         return
 
     try:
-        ffmpeg_path = discover_ffmpeg()
-        concat_file = write_concat_file(files, game_dir)
-        try:
-            cmd = build_concat_command(
-                ffmpeg_path,
-                concat_file,
-                out,
-                copy=copy,
-                video_codec=config.video.codec,
-                crf=config.video.crf,
-                audio_codec=config.video.audio_codec,
-            )
-            run_ffmpeg(cmd)
-        finally:
-            concat_file.unlink(missing_ok=True)
+        concat_files(
+            files,
+            out,
+            copy=copy,
+            video_codec=config.video.codec,
+            crf=config.video.crf,
+            audio_codec=config.video.audio_codec,
+        )
     except ReelnError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -1134,11 +1126,10 @@ def apply_profile(
                 event_meta["assists"] = assists_str
 
             if event_meta is not None:
-                from reeln.core.ffmpeg import discover_ffmpeg as _disc
                 from reeln.core.ffmpeg import probe_duration as _probe_dur
                 from reeln.core.overlay import build_overlay_context
 
-                dur = _probe_dur(_disc(), clip) or 10.0
+                dur = _probe_dur(clip) or 10.0
                 ctx = build_overlay_context(
                     ctx,
                     duration=dur,
@@ -1162,7 +1153,7 @@ def apply_profile(
         if rp.lut is not None:
             typer.echo(f"LUT: {rp.lut}")
         if rendered_subtitle is not None:
-            typer.echo(f"Subtitle: {rp.subtitle_template}")
+            typer.echo(f"Overlay: {rp.subtitle_template}")
 
         if dry_run:
             typer.echo("Dry run — no files written")

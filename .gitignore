@@ -28,6 +28,7 @@ htmlcov/
 secrets/
 output/
 .tmp/
+ffmpeg2pass-*
 
 # Sphinx docs build
 docs/_build/

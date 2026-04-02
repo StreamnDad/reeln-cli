@@ -12,6 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12.3",
     "filelock>=3.0",
+    "reeln-native>=0.2.3,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -68,4 +69,8 @@ implicit_reexport = true
 
 [[tool.mypy.overrides]]
 module = "questionary.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "reeln_native.*"
 ignore_missing_imports = true

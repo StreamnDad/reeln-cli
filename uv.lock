@@ -757,6 +757,7 @@ name = "reeln"
 source = { editable = "." }
 dependencies = [
     { name = "filelock" },
+    { name = "reeln-native" },
     { name = "typer" },
 ]
 
@@ -791,12 +792,27 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'" },
     { name = "questionary", marker = "extra == 'dev'", specifier = ">=2.0.1" },
     { name = "questionary", marker = "extra == 'interactive'", specifier = ">=2.0.1" },
+    { name = "reeln-native", specifier = ">=0.2.3,<1.0" },
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.0" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5" },
     { name = "typer", specifier = ">=0.12.3" },
 ]
 provides-extras = ["dev", "docs", "interactive"]
+
+[[package]]
+name = "reeln-native"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ea/9f/30cf53542612e88f6be8d4bd8297e92bea5f343b9ca2fc3611e6d7c8e395/reeln_native-0.2.3.tar.gz", hash = "sha256:18731ed8991554f6c93972e0295b3adb693ed8df23ecc1d3c3766b87872f858e", size = 95511, upload-time = "2026-04-02T13:29:51.369Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f0/37/92874e53c6c88e85eeefc066ca3880771d9b5c5d3a13d97adcc6180543a6/reeln_native-0.2.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:e2f1ec69c8117501105450220071ac281d20847003ed88d7531b340d5993e102", size = 1939152, upload-time = "2026-04-02T13:29:39.237Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/45/f8b4d6dd3e5e8f81a292c72361e0e93b7ec241af73510feaeeb8e8ea9da6/reeln_native-0.2.3-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:ca74de7d0287209c7cb8953fe8e3e3bd696506a8dd913b37f687c37ec984a541", size = 14030239, upload-time = "2026-04-02T13:29:40.918Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/ea/aa6c5daa8ec15ea8f5feb72df61858b3966d093a937bfe2c6e9aa8feb44c/reeln_native-0.2.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:3aa8e3c92737d3d9635aa942b5d7a7c6845042e9850260bafd7ab8c35c459692", size = 1937281, upload-time = "2026-04-02T13:29:43.272Z" },
+    { url = "https://files.pythonhosted.org/packages/01/a3/4e2f3e7566106a6a6c03d8946db5bd8a133096231d3532b631b0c05632b2/reeln_native-0.2.3-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:45fdcd9913a9e62727c8a254e9964b0684797ae1146f04de2bd28022fd183059", size = 14029355, upload-time = "2026-04-02T13:29:44.946Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/6c/971eaeaf6d6dd84e401f49ff1fb6676ab5392973b116e5d3186700c9ddd7/reeln_native-0.2.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:32d41796db7fa9d5026726161f29a2e141d74f5fa4422e23268fa978505da1c2", size = 1937027, upload-time = "2026-04-02T13:29:47.162Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/23/f083f434e834df9175cf994a4f881b86585397583fd7dc11c76f5a31f11e/reeln_native-0.2.3-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:42addf1993e1f6ee07453bb54bba8e76af94ef801652735aaac3280d5538dcf6", size = 14028812, upload-time = "2026-04-02T13:29:49.173Z" },
+]
 
 [[package]]
 name = "requests"

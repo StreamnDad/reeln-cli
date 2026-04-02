@@ -28,6 +28,7 @@ quickstart
 :maxdepth: 2
 
 guide/configuration
+guide/overlay-templates
 guide/sports
 ```
 

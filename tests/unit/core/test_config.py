@@ -807,6 +807,83 @@ def test_validate_config_iterations_valid() -> None:
     assert issues == []
 
 
+def test_validate_config_event_types_not_list() -> None:
+    issues = validate_config({"config_version": 1, "event_types": "bad"})
+    assert any("event_types" in i for i in issues)
+
+
+def test_validate_config_event_types_entry_not_string() -> None:
+    issues = validate_config({"config_version": 1, "event_types": [123]})
+    assert any("event_types[0]" in i for i in issues)
+
+
+def test_validate_config_event_types_valid() -> None:
+    issues = validate_config({"config_version": 1, "event_types": ["goal", "save"]})
+    assert issues == []
+
+
+def test_validate_config_iterations_references_unknown_event_type() -> None:
+    issues = validate_config({
+        "config_version": 1,
+        "event_types": ["goal"],
+        "iterations": {"mappings": {"goal": ["slowmo"], "save": ["replay"]}},
+    })
+    assert any("save" in i for i in issues)
+
+
+def test_validate_config_iterations_nested_mappings_key() -> None:
+    """iterations dict without a 'mappings' key uses the dict itself as mappings."""
+    issues = validate_config({
+        "config_version": 1,
+        "event_types": ["goal"],
+        "iterations": {"goal": ["slowmo"], "default": ["normal"]},
+    })
+    assert issues == []
+
+
+def test_validate_config_iterations_mappings_not_dict() -> None:
+    """mappings value that is not a dict is silently skipped."""
+    issues = validate_config({
+        "config_version": 1,
+        "event_types": ["goal"],
+        "iterations": {"mappings": ["not", "a", "dict"]},
+    })
+    assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# dict_to_config event types
+# ---------------------------------------------------------------------------
+
+
+def test_dict_to_config_event_types_string_entries() -> None:
+    """Plain string entries in event_types are parsed into EventTypeEntry."""
+    cfg = dict_to_config({"event_types": ["goal", "save"]})
+    assert len(cfg.event_types) == 2
+    assert cfg.event_types[0].name == "goal"
+    assert cfg.event_types[0].team_specific is False
+
+
+def test_dict_to_config_event_types_dict_entries() -> None:
+    """Dict entries with name/team_specific are parsed correctly."""
+    cfg = dict_to_config({"event_types": [{"name": "goal", "team_specific": True}]})
+    assert len(cfg.event_types) == 1
+    assert cfg.event_types[0].name == "goal"
+    assert cfg.event_types[0].team_specific is True
+
+
+def test_dict_to_config_event_types_dict_missing_name_ignored() -> None:
+    """Dict entry without 'name' key is silently skipped."""
+    cfg = dict_to_config({"event_types": [{"team_specific": True}]})
+    assert cfg.event_types == []
+
+
+def test_dict_to_config_event_types_not_list_ignored() -> None:
+    """Non-list event_types is silently ignored."""
+    cfg = dict_to_config({"event_types": "bad"})
+    assert cfg.event_types == []
+
+
 # ---------------------------------------------------------------------------
 # Load
 # ---------------------------------------------------------------------------
