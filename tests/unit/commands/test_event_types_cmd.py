@@ -174,3 +174,18 @@ def test_event_types_defaults_missing_config(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "event-types", "defaults", "--config", str(tmp_path / "nope.json")])
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_default_event_type_entries() -> None:
+    from reeln.core.event_types import default_event_type_entries
+
+    entries = default_event_type_entries("hockey")
+    assert len(entries) > 0
+    assert entries[0].name == "goal"
+    assert entries[0].team_specific is True
+
+
+def test_default_event_type_entries_unknown_sport() -> None:
+    from reeln.core.event_types import default_event_type_entries
+
+    assert default_event_type_entries("curling") == []
