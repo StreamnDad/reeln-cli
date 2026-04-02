@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.35] - 2026-04-02
+
+### Added
+- `examples/` directory with 10 step-by-step walkthrough pages covering install, OBS setup, game lifecycle, rendering, profiles, plugins, and smart zoom
+- Examples integrated into Read the Docs via `docs/examples/` section
+- Video demo talking points (gitignored, presenter-only)
+
+### Changed
+- README.md rewritten: prominent ffmpeg dependency callout, updated CLI reference (removed stale "coming soon" section), added examples link
+- Docs index updated with ffmpeg admonition, current feature list, and examples toctree entry
+
 ## [0.0.34] - 2026-04-02
 
 ### Added

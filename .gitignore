@@ -37,6 +37,9 @@ docs/_build/
 CLAUDE.md
 AGENTS.md
 
+# Video demo notes — presenter-only, not published
+examples/_video-talking-points.md
+
 # IDE
 .idea/
 .vscode/

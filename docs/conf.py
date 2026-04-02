@@ -50,6 +50,10 @@ source_suffix = {
 }
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
+# Suppress warnings for relative links in included example files — these links
+# work on GitHub (primary consumption) but can't resolve in the Sphinx build.
+suppress_warnings = ["myst.xref_missing"]
+
 # -- Intersphinx mapping ----------------------------------------------------
 
 intersphinx_mapping = {

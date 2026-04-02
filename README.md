@@ -12,37 +12,80 @@
 
 reeln handles video manipulation, segment/highlight management, and media lifecycle — generic by default, sport-specific through configuration. Built by [Streamn Dad](https://streamn.dad).
 
+## Requirements
+
+- **Python 3.11+**
+- **ffmpeg 5.0+** with libx264, aac, and libass
+
+> **Important:** reeln requires ffmpeg installed on your system. It is used for
+> all video processing — merging, rendering, overlays, and encoding. Install it
+> before using reeln, then run `reeln doctor` to verify.
+>
+> ```bash
+> # macOS
+> brew install ffmpeg
+>
+> # Ubuntu / Debian
+> sudo apt install ffmpeg
+>
+> # Windows
+> winget install ffmpeg
+> ```
+
+## Install
+
+```bash
+# With pip
+pip install reeln
+
+# With uv (recommended)
+uv tool install reeln
+```
+
+Verify everything is working:
+
+```bash
+reeln --version
+reeln doctor          # checks ffmpeg, codecs, config, permissions, plugins
+```
+
 ## Features
 
-- **Game lifecycle management** — init, segment, highlights, finish
-- **FFmpeg-powered video merging** — concat segments into highlight reels, no re-encoding
-- **Sport-agnostic segment model** — hockey periods, basketball quarters, soccer halves, and more
-- **Flexible configuration** — JSON config with XDG-compliant paths, env var overrides, named profiles
-- **Pipeline debugging** — `--debug` flag captures ffmpeg commands, filter chains, and metadata for troubleshooting
-- **Plugin-ready architecture** — lifecycle hooks, typed capability interfaces, and config schema declarations
+- **Game lifecycle management** — init, segment processing, highlights, events, finish
+- **Short-form rendering** — crop, scale, speed, LUT, overlays — landscape to vertical/square
+- **FFmpeg-powered merging** — concat segments into highlight reels with smart re-encoding
+- **Sport-agnostic segments** — hockey periods, basketball quarters, soccer halves, and more
+- **Render profiles** — save and reuse rendering settings, chain them with iterations
+- **Smart zoom** — AI-powered tracking that follows the action (via plugin)
+- **Player overlays** — roster-aware goal overlays with jersey number lookup
+- **Plugin architecture** — lifecycle hooks for YouTube, Instagram, cloud uploads, and more
+- **Flexible configuration** — JSON config, XDG paths, env var overrides, named profiles
 - **Cross-platform** — macOS, Linux, Windows
 
 ## Quick start
 
 ```bash
-# Install
-pip install reeln
-
-# Verify it works
-reeln --version
-
-# View your configuration
-reeln config show
-
 # Initialize a hockey game
 reeln game init roseville mahtomedi --sport hockey
+
+# Process segments as the game progresses
+reeln game segment 1
+reeln game segment 2
+reeln game segment 3
+
+# Merge into a full-game highlight reel
+reeln game highlights
+
+# Render a vertical short for social media
+reeln render short clip.mkv --crop crop --speed 0.5
+
+# Finish the game
+reeln game finish
 ```
 
-More commands are being built — rendering and media management are on the roadmap. See the [CLI reference](#cli-reference) below for what's available and what's coming.
+See the [examples](examples/) for detailed walkthroughs of every workflow.
 
 ## Supported sports
-
-reeln adapts its directory structure and terminology to your sport:
 
 | Sport | Segment name | Count | Example directories |
 |---|---|---|---|
@@ -54,39 +97,56 @@ reeln adapts its directory structure and terminology to your sport:
 | lacrosse | quarter | 4 | `quarter-1/` through `quarter-4/` |
 | generic | segment | 1 | `segment-1/` |
 
-Custom sports can be registered in your config file.
-
 ## CLI reference
 
-**Available now:**
+### System
 
 | Command | Description |
 |---|---|
-| `reeln --version` | Show version |
-| `reeln --help` | Show help and available commands |
-| `reeln config show` | Display current configuration |
-| `reeln config doctor` | Validate config, warn on issues |
-| `reeln game init` | Set up game directory with sport-specific segments |
+| `reeln --version` | Show version and ffmpeg info |
+| `reeln doctor` | Health check: ffmpeg, codecs, config, permissions, plugins |
 
+### Game lifecycle
+
+| Command | Description |
+|---|---|
+| `reeln game init` | Set up game directory with sport-specific segments |
+| `reeln game segment <N>` | Collect replays and merge segment highlights |
+| `reeln game highlights` | Merge all segments into full-game highlight reel |
+| `reeln game compile` | Compile event clips by type, segment, or player |
+| `reeln game finish` | Finalize game and show summary |
+| `reeln game prune` | Remove generated artifacts |
+| `reeln game event list` | List registered events |
+| `reeln game event tag` | Tag an event with type, player, metadata |
+
+### Rendering
+
+| Command | Description |
+|---|---|
+| `reeln render short` | Render 9:16 or 1:1 short from clip |
+| `reeln render preview` | Fast low-res preview render |
+| `reeln render apply` | Apply a render profile (full-frame, no crop) |
+| `reeln render reel` | Assemble rendered shorts into a reel |
+
+### Configuration
+
+| Command | Description |
+|---|---|
+| `reeln config show` | Display resolved configuration |
+| `reeln config doctor` | Validate config and warn on issues |
+| `reeln config event-types` | Manage event types |
+
+### Plugins
+
+| Command | Description |
+|---|---|
 | `reeln plugins search` | Search the plugin registry |
-| `reeln plugins info <name>` | Show detailed plugin information |
+| `reeln plugins info <name>` | Show plugin details and config schema |
 | `reeln plugins install <name>` | Install a plugin from the registry |
-| `reeln plugins update [name]` | Update a plugin or all installed plugins |
-| `reeln plugins list` | List installed plugins with version info |
+| `reeln plugins update [name]` | Update a plugin or all installed |
+| `reeln plugins list` | List installed plugins |
 | `reeln plugins enable <name>` | Enable a plugin |
 | `reeln plugins disable <name>` | Disable a plugin |
-
-**Coming soon** (command groups are registered, implementation in progress):
-
-| Command | Description |
-|---|---|
-| `reeln game segment <N>` | Move replays and merge segment highlights |
-| `reeln game highlights` | Merge all segments into full-game highlight reel |
-| `reeln game finish` | Finalize game, cleanup temp files |
-| `reeln render short` | Render 9:16 short from clip |
-| `reeln render preview` | Fast low-res preview render |
-| `reeln media prune` | Artifact cleanup (supports `--dry-run`) |
-| `reeln doctor` | Health check: ffmpeg, config, permissions |
 
 ## Configuration
 
@@ -98,37 +158,13 @@ reeln uses a layered JSON config system:
 4. **Environment variables** — `REELN_<SECTION>_<KEY>`
 
 ```bash
-# Override any config value via env var
-export REELN_VIDEO_FFMPEG_PATH=/opt/ffmpeg/bin/ffmpeg
-export REELN_PATHS_OUTPUT_DIR=~/custom-output
-
-# View the resolved config
 reeln config show
-```
-
-## Requirements
-
-- Python 3.11+
-- [ffmpeg 5.0+](https://ffmpeg.org/)
-
-## Installation
-
-```bash
-# With pip
-pip install reeln
-
-# With uv
-uv tool install reeln
-
-# Development
-git clone https://github.com/StreamnDad/reeln-cli.git
-cd reeln-cli
-make dev-install
 ```
 
 ## Documentation
 
-Full documentation is available at [reeln-cli.readthedocs.io](https://reeln-cli.readthedocs.io).
+- [Full documentation](https://reeln-cli.readthedocs.io) — install, guides, CLI reference
+- [Examples](examples/) — step-by-step walkthroughs for common workflows
 
 ## License
 
