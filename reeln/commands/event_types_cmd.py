@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -17,8 +16,8 @@ app = typer.Typer(no_args_is_help=True, help="Manage configured event types.")
 
 @app.command("list")
 def list_cmd(
-    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Show configured event types (or sport defaults if none configured)."""
     try:
@@ -45,8 +44,8 @@ def list_cmd(
 def add(
     event_type: str = typer.Argument(..., help="Event type to add."),
     team: bool = typer.Option(False, "--team", help="Mark as team-specific (Home/Away variants)."),
-    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Add an event type to the configuration."""
     try:
@@ -69,8 +68,8 @@ def add(
 @app.command()
 def remove(
     event_type: str = typer.Argument(..., help="Event type to remove."),
-    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Remove an event type from the configuration."""
     try:
@@ -93,8 +92,8 @@ def remove(
 @app.command("set")
 def set_cmd(
     event_types: list[str] = typer.Argument(..., help="Event types to set (replaces existing)."),
-    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Replace all configured event types."""
     try:
@@ -110,8 +109,8 @@ def set_cmd(
 
 @app.command()
 def defaults(
-    profile: Optional[str] = typer.Option(None, "--profile", help="Named config profile."),
-    config_path: Optional[Path] = typer.Option(None, "--config", help="Explicit config file path."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """Show default event types for the configured sport."""
     try:
