@@ -103,7 +103,7 @@ Named render profiles define reusable rendering parameter overrides. Add a `rend
 |---|---|---|
 | `speed` | float | Playback speed (e.g. 0.5 for slow motion) |
 | `lut` | string | Path to `.cube` LUT file for color grading |
-| `subtitle_template` | string | Path to `.ass` subtitle template, or `builtin:<name>` for bundled templates |
+| `subtitle_template` | string | Path to `.ass` subtitle template, or `builtin:<name>` for bundled templates. See {doc}`/guide/overlay-templates`. |
 | `width` | int | Target width (short-form only, ignored for full-frame) |
 | `height` | int | Target height (short-form only, ignored for full-frame) |
 | `crop_mode` | string | `"pad"` or `"crop"` (short-form only) |

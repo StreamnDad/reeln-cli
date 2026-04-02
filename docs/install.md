@@ -29,6 +29,10 @@ make dev-install
 
 This creates a virtual environment and installs reeln in editable mode with dev dependencies (pytest, ruff, mypy).
 
+:::{note}
+`reeln-native` (Rust-powered acceleration for media probing, concatenation, and overlay rendering) is bundled automatically — no extra install step needed. Pre-built wheels are available for Linux (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64).
+:::
+
 ## Install ffmpeg
 
 reeln requires ffmpeg 5.0 or later. After installing, run `reeln doctor` to verify your setup.

@@ -366,9 +366,8 @@ def _do_short(
 
     # Apply render profile overlay if specified
     rendered_subtitle: Path | None = None
-    png_overlay: Path | None = None
     if render_profile_name is not None:
-        from reeln.core.profiles import resolve_overlay_for_profile
+        from reeln.core.profiles import resolve_subtitle_for_profile
         from reeln.core.templates import build_base_context
 
         try:
@@ -416,12 +415,7 @@ def _do_short(
 
             subtitle_dir = (output or _default_output(clip, "_short")).parent
             subtitle_dir.mkdir(parents=True, exist_ok=True)
-            overlay = resolve_overlay_for_profile(rp, ctx, subtitle_dir)
-            if overlay is not None:
-                if overlay.is_png:
-                    png_overlay = overlay.path
-                else:
-                    rendered_subtitle = overlay.path
+            rendered_subtitle = resolve_subtitle_for_profile(rp, ctx, subtitle_dir)
 
         short_config = apply_profile_to_short(short_config, rp, rendered_subtitle=rendered_subtitle)
 
@@ -680,18 +674,6 @@ def _do_short(
         except ReelnError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-
-        # PNG overlay compositing (post-render step)
-        if png_overlay is not None:
-            from reeln.core.ffmpeg import composite_video_overlay
-
-            composited = out.with_stem(f"{out.stem}_comp")
-            try:
-                composite_video_overlay(out, png_overlay, composited)
-                out.unlink(missing_ok=True)
-                composited.rename(out)
-            finally:
-                png_overlay.unlink(missing_ok=True)
 
         _post_data: dict[str, Any] = {"plan": plan, "result": result}
         if render_game_info is not None:
@@ -1038,8 +1020,8 @@ def apply_profile(
     """Apply a named render profile to a clip (full-frame, no crop/scale)."""
     from reeln.core.profiles import (
         plan_full_frame,
-        resolve_overlay_for_profile,
         resolve_profile,
+        resolve_subtitle_for_profile,
     )
     from reeln.core.templates import build_base_context
 
@@ -1129,7 +1111,6 @@ def apply_profile(
         raise typer.Exit(code=1) from exc
 
     rendered_subtitle: Path | None = None
-    apply_png_overlay: Path | None = None
     try:
         if rp.subtitle_template is not None:
             ctx = (
@@ -1156,12 +1137,7 @@ def apply_profile(
                     scoring_team=_scoring_team_name,
                 )
             out.parent.mkdir(parents=True, exist_ok=True)
-            overlay = resolve_overlay_for_profile(rp, ctx, out.parent)
-            if overlay is not None:
-                if overlay.is_png:
-                    apply_png_overlay = overlay.path
-                else:
-                    rendered_subtitle = overlay.path
+            rendered_subtitle = resolve_subtitle_for_profile(rp, ctx, out.parent)
 
         try:
             plan = plan_full_frame(clip, out, rp, config, rendered_subtitle=rendered_subtitle)
@@ -1176,7 +1152,7 @@ def apply_profile(
             typer.echo(f"Speed: {rp.speed}x")
         if rp.lut is not None:
             typer.echo(f"LUT: {rp.lut}")
-        if rendered_subtitle is not None or apply_png_overlay is not None:
+        if rendered_subtitle is not None:
             typer.echo(f"Overlay: {rp.subtitle_template}")
 
         if dry_run:
@@ -1201,18 +1177,6 @@ def apply_profile(
         except ReelnError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
-
-        # PNG overlay compositing (post-render step)
-        if apply_png_overlay is not None:
-            from reeln.core.ffmpeg import composite_video_overlay
-
-            composited = out.with_stem(f"{out.stem}_comp")
-            try:
-                composite_video_overlay(out, apply_png_overlay, composited)
-                out.unlink(missing_ok=True)
-                composited.rename(out)
-            finally:
-                apply_png_overlay.unlink(missing_ok=True)
 
         _apply_post: dict[str, Any] = {"plan": plan, "result": result}
         if apply_game_info is not None:

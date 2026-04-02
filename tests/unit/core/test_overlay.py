@@ -270,8 +270,8 @@ class TestBuildOverlayContext:
         assert result.get("goal_overlay_box_y") == str(820 + 50)
         assert result.get("goal_overlay_team_y") == str(828 + 50)
         assert result.get("goal_overlay_scorer_y") == str(852 + 50)
-        assert result.get("goal_overlay_assist_1_y") == str(892 + 50)
-        assert result.get("goal_overlay_assist_2_y") == str(914 + 50)
+        assert result.get("goal_overlay_assist_1_y") == str(895 + 50)
+        assert result.get("goal_overlay_assist_2_y") == str(921 + 50)
 
     def test_zero_y_offset(self) -> None:
         ctx = self._base_ctx()

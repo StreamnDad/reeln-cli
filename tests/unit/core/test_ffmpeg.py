@@ -229,6 +229,16 @@ def test_probe_duration_timeout() -> None:
         assert probe_duration(Path("/usr/bin/ffmpeg"), Path("video.mkv")) is None
 
 
+def test_probe_duration_single_arg() -> None:
+    """Single-arg form auto-discovers ffmpeg."""
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc("42.5\n")),
+    ):
+        result = probe_duration(Path("video.mkv"))
+    assert result == 42.5
+
+
 def test_probe_fps_fractional() -> None:
     with patch("reeln.core.ffmpeg.subprocess.run", return_value=_mock_probe_proc("60000/1001\n")):
         result = probe_fps(Path("/usr/bin/ffmpeg"), Path("video.mkv"))

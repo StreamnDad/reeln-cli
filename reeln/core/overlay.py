@@ -113,7 +113,7 @@ def build_overlay_context(
     scorer_base = 46 if has_assists else 54
     scorer_min = 32 if has_assists else 38
     goal_scorer_fs = str(overlay_font_size(scorer_text, base=scorer_base, min_size=scorer_min, max_chars=24))
-    goal_assist_fs = str(overlay_font_size(f"{assist_1} {assist_2}".strip(), base=24, min_size=18, max_chars=30))
+    goal_assist_fs = str(overlay_font_size(f"{assist_1} {assist_2}".strip(), base=20, min_size=16, max_chars=30))
 
     # Colors
     primary_rgb = _DEFAULT_PRIMARY
@@ -174,19 +174,19 @@ def build_overlay_context(
         "goal_overlay_border_x": "0",
         "goal_overlay_border_y": str(817 + y_offset),
         "goal_overlay_border_w": "1920",
-        "goal_overlay_border_h": "141",
+        "goal_overlay_border_h": str(148 if has_assists else 141),
         "goal_overlay_box_x": "3",
         "goal_overlay_box_y": str(820 + y_offset),
         "goal_overlay_box_w": "1914",
-        "goal_overlay_box_h": "135",
+        "goal_overlay_box_h": str(142 if has_assists else 135),
         "goal_overlay_team_x": "83",
         "goal_overlay_team_y": str(828 + y_offset),
         "goal_overlay_scorer_x": "113",
         "goal_overlay_scorer_y": str(852 + y_offset),
         "goal_overlay_assist_1_x": "140",
-        "goal_overlay_assist_1_y": str(892 + y_offset),
+        "goal_overlay_assist_1_y": str(895 + y_offset),
         "goal_overlay_assist_2_x": "140",
-        "goal_overlay_assist_2_y": str(914 + y_offset),
+        "goal_overlay_assist_2_y": str(921 + y_offset),
     }
 
     return base.merge(TemplateContext(variables=variables))

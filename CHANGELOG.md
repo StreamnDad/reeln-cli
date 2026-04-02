@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.34] - 2026-04-02
+
+### Added
+- `reeln hooks run` and `reeln hooks list` CLI commands for non-interactive hook execution (JSON-in/JSON-out, designed for reeln-dock integration)
+- `reeln-native` v0.2.0 as a required dependency (Rust-powered acceleration)
+- `native-dev` and `plugins` Makefile targets for local development
+
+### Changed
+- Goal overlay layout: dynamic box height when assists are present, adjusted assist Y-coordinates for better spacing
+- `probe_duration()` now accepts single-arg form with auto-discovery (`probe_duration(path)`)
+- Overlay template documentation now covers ASS templates only (JSON templates deferred to native migration)
+
+### Removed
+- Dead PNG overlay pipeline (`ResolvedOverlay`, `resolve_overlay_for_profile`, `composite_video_overlay`) — unreachable code from incomplete JSON template integration
+- `goal_overlay.json` template (nothing loaded it)
+- Shell completion Makefile targets (replaced by symlink install)
+
 ## [0.0.33] - 2026-03-23
 
 ### Added

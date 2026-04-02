@@ -135,9 +135,18 @@ def check_version(ffmpeg_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def probe_duration(ffmpeg_path: Path, input_path: Path) -> float | None:
-    """Probe the duration of a media file in seconds."""
-    ffprobe = derive_ffprobe(ffmpeg_path)
+def probe_duration(ffmpeg_path_or_input: Path, input_path: Path | None = None) -> float | None:
+    """Probe the duration of a media file in seconds.
+
+    Can be called as ``probe_duration(input)`` (auto-discovers ffmpeg)
+    or ``probe_duration(ffmpeg_path, input)`` for backwards compatibility.
+    """
+    if input_path is None:
+        actual_input = ffmpeg_path_or_input
+        ffprobe = derive_ffprobe(discover_ffmpeg())
+    else:
+        actual_input = input_path
+        ffprobe = derive_ffprobe(ffmpeg_path_or_input)
     cmd = [
         str(ffprobe),
         "-v",
@@ -146,7 +155,7 @@ def probe_duration(ffmpeg_path: Path, input_path: Path) -> float | None:
         "format=duration",
         "-of",
         "default=noprint_wrappers=1:nokey=1",
-        str(input_path),
+        str(actual_input),
     ]
     return _run_probe_float(cmd)
 
@@ -471,6 +480,38 @@ def run_ffmpeg(cmd: list[str], *, timeout: int = 600) -> subprocess.CompletedPro
         raise FFmpegError(f"ffmpeg exited with code {proc.returncode}: {stderr}")
 
     return proc
+
+
+def concat_files(
+    files: list[Path],
+    output: Path,
+    *,
+    copy: bool = True,
+    video_codec: str = "libx264",
+    crf: int = 18,
+    audio_codec: str = "aac",
+) -> None:
+    """Concatenate media files via the ffmpeg concat demuxer.
+
+    Convenience wrapper around ``build_concat_command`` + ``write_concat_file``
+    + ``run_ffmpeg``.
+    """
+    ffmpeg_path = discover_ffmpeg()
+    concat_file = write_concat_file(files, output.parent)
+    try:
+        cmd = build_concat_command(
+            ffmpeg_path,
+            concat_file,
+            output,
+            copy=copy,
+            video_codec=video_codec,
+            crf=crf,
+            audio_codec=audio_codec,
+        )
+        run_ffmpeg(cmd)
+    finally:
+        concat_file.unlink(missing_ok=True)
+
 
 
 def build_extract_frame_command(
