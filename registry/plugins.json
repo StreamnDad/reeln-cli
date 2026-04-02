@@ -19,7 +19,20 @@
       "homepage": "https://github.com/StreamnDad/reeln-plugin-google",
       "min_reeln_version": "0.0.31",
       "author": "StreamnDad",
-      "license": "AGPL-3.0"
+      "license": "AGPL-3.0",
+      "ui_contributions": {
+        "input_fields": {
+          "game_init": [
+            {
+              "id": "thumbnail_image",
+              "label": "Thumbnail Image",
+              "type": "file",
+              "required": false,
+              "description": "Thumbnail image for YouTube livestream"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "meta",
@@ -44,6 +57,7 @@
     {
       "name": "openai",
       "package": "reeln-plugin-openai",
+      "version": "0.8.2",
       "description": "OpenAI-powered LLM integration — livestream metadata, render metadata, game thumbnails, and translation",
       "capabilities": ["hook:ON_GAME_INIT", "hook:POST_RENDER", "hook:ON_FRAMES_EXTRACTED"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-openai",
