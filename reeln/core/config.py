@@ -135,9 +135,7 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
 
     if full or config.event_types:
         d["event_types"] = [
-            {"name": et.name, "team_specific": et.team_specific}
-            if et.team_specific
-            else et.name
+            {"name": et.name, "team_specific": et.team_specific} if et.team_specific else et.name
             for et in config.event_types
         ]
 
@@ -157,9 +155,7 @@ def config_to_dict(config: AppConfig, *, full: bool = False) -> dict[str, Any]:
     }
 
     has_branding = (
-        not config.branding.enabled
-        or config.branding.template != "builtin:branding"
-        or config.branding.duration != 5.0
+        not config.branding.enabled or config.branding.template != "builtin:branding" or config.branding.duration != 5.0
     )
     if full or has_branding:
         d["branding"] = {
@@ -421,9 +417,7 @@ def validate_config(data: dict[str, Any]) -> list[str]:
             if isinstance(mappings, dict):
                 for key in mappings:
                     if key != "default" and key not in type_set:
-                        issues.append(
-                            f"iterations references type '{key}' not listed in event_types"
-                        )
+                        issues.append(f"iterations references type '{key}' not listed in event_types")
 
     return issues
 

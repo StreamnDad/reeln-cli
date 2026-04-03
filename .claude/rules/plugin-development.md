@@ -264,4 +264,88 @@ def on_game_init(self, context: HookContext) -> None:
 - **Tests:** use `tmp_path` for file I/O, mock external API clients
 - **Package naming:** `reeln-plugin-<name>` (PyPI), `reeln_<name>_plugin` (Python package)
 - **Entry point:** `reeln.plugins` group, plugin name as key
-- **No CLI arg registration:** plugins do not register CLI arguments. Use feature flags in plugin config (`smart_zoom_enabled`, etc.). Core CLI flags (`--smart`) trigger hooks; plugins decide behavior via their own config
+- **Input contributions:** plugins declare additional user inputs via `input_schema: PluginInputSchema` class attribute. These are prompted interactively or passed via `--plugin-input KEY=VALUE`. See "Plugin Input Contributions" section below
+- **No direct CLI arg registration:** plugins do not register CLI arguments directly. Use `input_schema` for user inputs and feature flags in plugin config for capability toggles. Core CLI flags (`--smart`) trigger hooks; plugins decide behavior via their own config
+
+## Plugin Input Contributions
+
+Plugins declare additional user inputs via `input_schema`, a class attribute of type `PluginInputSchema`. Each `InputField` is scoped to a CLI command and collected automatically.
+
+### Declaration (plugin class)
+
+```python
+from reeln.models.plugin_input import InputField, PluginInputSchema
+
+class GooglePlugin:
+    input_schema = PluginInputSchema(fields=(
+        InputField(
+            id="thumbnail_image",
+            label="Thumbnail Image",
+            field_type="file",
+            command="game_init",
+            plugin_name="google",
+            required=False,
+            description="Thumbnail image for YouTube livestream",
+        ),
+    ))
+```
+
+### Declaration (registry JSON)
+
+For reeln-dock to render UI fields without loading Python code:
+
+```json
+{
+  "ui_contributions": {
+    "input_fields": {
+      "game_init": [
+        {
+          "id": "thumbnail_image",
+          "label": "Thumbnail Image",
+          "type": "file",
+          "required": false,
+          "description": "Thumbnail image for YouTube livestream"
+        }
+      ]
+    }
+  }
+}
+```
+
+### How inputs are collected
+
+- **Interactive mode:** prompted via questionary after core prompts
+- **Non-interactive mode:** passed via `--plugin-input KEY=VALUE` (repeatable, aliased `-I`)
+- **reeln-dock:** rendered as form fields based on registry `input_fields`
+
+### How plugins read collected inputs
+
+Inputs are passed via `HookContext.data["plugin_inputs"]`:
+
+```python
+def on_game_init(self, context: HookContext) -> None:
+    inputs = context.data.get("plugin_inputs", {})
+    thumbnail = inputs.get("thumbnail_image")
+```
+
+### Valid command scopes
+
+`game_init`, `game_finish`, `game_segment`, `render_short`, `render_preview`
+
+### Valid field types
+
+`str`, `int`, `float`, `bool`, `file`, `select`
+
+### Conflict resolution
+
+When two plugins declare the same `id` for the same command:
+- **Same type:** first-registered wins (plugin load order), duplicate logged
+- **Different type:** second field namespaced as `{plugin_name}.{id}`, warning logged
+
+### Introspection
+
+```bash
+reeln plugins inputs                          # all registered fields
+reeln plugins inputs --command game_init      # filter by command
+reeln plugins inputs --json                   # JSON output for tooling
+```

@@ -190,10 +190,7 @@ def remap_zoom_path_for_speed_segments(
             prev = end
         return output_t
 
-    remapped = tuple(
-        replace(p, timestamp=_source_to_output(p.timestamp))
-        for p in zoom_path.points
-    )
+    remapped = tuple(replace(p, timestamp=_source_to_output(p.timestamp)) for p in zoom_path.points)
     new_duration = _source_to_output(zoom_path.duration)
     return replace(zoom_path, points=remapped, duration=new_duration)
 

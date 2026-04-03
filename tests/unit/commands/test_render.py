@@ -5080,3 +5080,38 @@ def test_render_short_branding_error_continues(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Warning: Failed to resolve branding" in result.output
     assert "Dry run" in result.output
+
+
+def test_render_short_plugin_input_in_hook_data(tmp_path: Path) -> None:
+    """--plugin-input values are included in PRE_RENDER and POST_RENDER hook data."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    mock_result = _mock_result(tmp_path)
+
+    captured_pre: dict[str, object] = {}
+    captured_post: dict[str, object] = {}
+
+    def _capture_emit(hook: object, ctx: object) -> None:
+        from reeln.plugins.hooks import Hook
+
+        if hasattr(ctx, "data"):
+            if hook == Hook.PRE_RENDER:
+                captured_pre.update(ctx.data)
+            elif hook == Hook.POST_RENDER:
+                captured_post.update(ctx.data)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_cls,
+        patch("reeln.plugins.registry.get_registry") as mock_reg,
+    ):
+        mock_cls.return_value.render.return_value = mock_result
+        mock_reg.return_value.emit.side_effect = _capture_emit
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "-I", "mykey=myval"],
+        )
+
+    assert result.exit_code == 0
+    assert captured_pre.get("plugin_inputs") == {"mykey": "myval"}
+    assert captured_post.get("plugin_inputs") == {"mykey": "myval"}

@@ -823,31 +823,37 @@ def test_validate_config_event_types_valid() -> None:
 
 
 def test_validate_config_iterations_references_unknown_event_type() -> None:
-    issues = validate_config({
-        "config_version": 1,
-        "event_types": ["goal"],
-        "iterations": {"mappings": {"goal": ["slowmo"], "save": ["replay"]}},
-    })
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": ["goal"],
+            "iterations": {"mappings": {"goal": ["slowmo"], "save": ["replay"]}},
+        }
+    )
     assert any("save" in i for i in issues)
 
 
 def test_validate_config_iterations_nested_mappings_key() -> None:
     """iterations dict without a 'mappings' key uses the dict itself as mappings."""
-    issues = validate_config({
-        "config_version": 1,
-        "event_types": ["goal"],
-        "iterations": {"goal": ["slowmo"], "default": ["normal"]},
-    })
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": ["goal"],
+            "iterations": {"goal": ["slowmo"], "default": ["normal"]},
+        }
+    )
     assert issues == []
 
 
 def test_validate_config_iterations_mappings_not_dict() -> None:
     """mappings value that is not a dict is silently skipped."""
-    issues = validate_config({
-        "config_version": 1,
-        "event_types": ["goal"],
-        "iterations": {"mappings": ["not", "a", "dict"]},
-    })
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": ["goal"],
+            "iterations": {"mappings": ["not", "a", "dict"]},
+        }
+    )
     assert issues == []
 
 

@@ -151,6 +151,7 @@ def init_game(
     dry_run: bool = False,
     home_profile: object | None = None,
     away_profile: object | None = None,
+    plugin_inputs: dict[str, Any] | None = None,
 ) -> tuple[Path, list[str]]:
     """Initialize a new game workspace.
 
@@ -159,6 +160,9 @@ def init_game(
 
     When *home_profile* / *away_profile* are provided they are included in the
     ``ON_GAME_INIT`` hook context so plugins can access team metadata.
+
+    *plugin_inputs* is an optional dict of values collected from the user
+    via plugin input contributions, passed through to hook contexts.
 
     In dry-run mode, no files or directories are created.
     """
@@ -202,6 +206,8 @@ def init_game(
         hook_data["home_profile"] = home_profile
     if away_profile is not None:
         hook_data["away_profile"] = away_profile
+    if plugin_inputs:
+        hook_data["plugin_inputs"] = plugin_inputs
 
     ctx = HookContext(hook=Hook.ON_GAME_INIT, data=hook_data)
     get_registry().emit(Hook.ON_GAME_INIT, ctx)

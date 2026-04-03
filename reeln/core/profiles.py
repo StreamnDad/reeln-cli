@@ -133,9 +133,7 @@ def build_profile_filter_chain(
     if has_segments:
         assert profile.speed_segments is not None
         validate_speed_segments(profile.speed_segments)
-        return _build_profile_speed_segments_chain(
-            profile, rendered_subtitle=rendered_subtitle
-        )
+        return _build_profile_speed_segments_chain(profile, rendered_subtitle=rendered_subtitle)
 
     filters: list[str] = []
 

@@ -78,8 +78,7 @@ def validate_speed_segments(segments: tuple[SpeedSegment, ...]) -> None:
         assert seg.until is not None
         if seg.until <= prev_until:
             raise RenderError(
-                f"speed_segments[{i}]: 'until' values must be strictly increasing, "
-                f"got {seg.until} after {prev_until}"
+                f"speed_segments[{i}]: 'until' values must be strictly increasing, got {seg.until} after {prev_until}"
             )
         prev_until = seg.until
 
@@ -266,7 +265,7 @@ def build_speed_segments_filters(
         chain = [trim, "setpts=PTS-STARTPTS"]
         if seg.speed != 1.0:
             chain.append(f"setpts=PTS/{seg.speed}")
-        video_parts.append(f"{v_labels[i]}{',' .join(chain)}{sv_labels[i]}")
+        video_parts.append(f"{v_labels[i]}{','.join(chain)}{sv_labels[i]}")
 
     video_parts.append(f"{''.join(sv_labels)}concat=n={n}:v=1:a=0[_vout]")
 
@@ -280,7 +279,7 @@ def build_speed_segments_filters(
         chain = [atrim, "asetpts=PTS-STARTPTS"]
         if seg.speed != 1.0:
             chain.append(_build_atempo_chain(seg.speed))
-        audio_parts.append(f"{a_labels[i]}{',' .join(chain)}{sa_labels[i]}")
+        audio_parts.append(f"{a_labels[i]}{','.join(chain)}{sa_labels[i]}")
 
     audio_parts.append(f"{''.join(sa_labels)}concat=n={n}:v=0:a=1[_aout]")
 
@@ -530,7 +529,8 @@ def _build_speed_segments_chain(
 
         # Wire post-filters (scale) after concat, label [_fg]
         video_graph = video_graph.replace(
-            "[_vout]", f"[_vout];[_vout]{','.join(post)}[_fg]",
+            "[_vout]",
+            f"[_vout];[_vout]{','.join(post)}[_fg]",
         )
 
         # Colour background and overlay
@@ -538,7 +538,10 @@ def _build_speed_segments_chain(
 
         fps_frac = _fps_to_fraction(source_fps)
         overlay_expr = build_smart_pad_filter(
-            zoom_path, config.width, config.height, config.pad_color,
+            zoom_path,
+            config.width,
+            config.height,
+            config.pad_color,
         )
 
         color_part = f"color=c={config.pad_color}:s={config.width}x{config.height}:r={fps_frac}[_bg]"

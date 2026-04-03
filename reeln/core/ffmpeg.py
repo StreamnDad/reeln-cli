@@ -388,9 +388,7 @@ def build_xfade_command(
     duration of the corresponding input in seconds.
     """
     if len(files) != len(durations):
-        raise FFmpegError(
-            f"files and durations must have the same length: {len(files)} vs {len(durations)}"
-        )
+        raise FFmpegError(f"files and durations must have the same length: {len(files)} vs {len(durations)}")
     if len(files) < 2:
         raise FFmpegError("xfade requires at least 2 input files")
 
@@ -410,31 +408,36 @@ def build_xfade_command(
     for i in range(1, n):
         v_in = f"[{i - 1}:v]" if i == 1 else f"[xf{i - 2}]"
         v_out = f"[xf{i - 1}]" if i < n - 1 else "[vout]"
-        v_parts.append(
-            f"{v_in}[{i}:v]xfade=transition=fade:duration={fade}:offset={offset:.6f}{v_out}"
-        )
+        v_parts.append(f"{v_in}[{i}:v]xfade=transition=fade:duration={fade}:offset={offset:.6f}{v_out}")
 
         a_in = f"[{i - 1}:a]" if i == 1 else f"[af{i - 2}]"
         a_out = f"[af{i - 1}]" if i < n - 1 else "[aout]"
-        a_parts.append(
-            f"{a_in}[{i}:a]acrossfade=d={fade}:c1=tri:c2=tri{a_out}"
-        )
+        a_parts.append(f"{a_in}[{i}:a]acrossfade=d={fade}:c1=tri:c2=tri{a_out}")
 
         if i < n - 1:
             offset += durations[i] - fade
 
     filter_complex = ";".join(v_parts + a_parts)
 
-    cmd.extend([
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-        "-map", "[aout]",
-        "-c:v", video_codec,
-        "-crf", str(crf),
-        "-c:a", audio_codec,
-        "-ar", str(audio_rate),
-        str(output),
-    ])
+    cmd.extend(
+        [
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vout]",
+            "-map",
+            "[aout]",
+            "-c:v",
+            video_codec,
+            "-crf",
+            str(crf),
+            "-c:a",
+            audio_codec,
+            "-ar",
+            str(audio_rate),
+            str(output),
+        ]
+    )
     return cmd
 
 
@@ -511,7 +514,6 @@ def concat_files(
         run_ffmpeg(cmd)
     finally:
         concat_file.unlink(missing_ok=True)
-
 
 
 def build_extract_frame_command(

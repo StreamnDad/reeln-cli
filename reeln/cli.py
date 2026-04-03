@@ -26,45 +26,41 @@ app.add_typer(plugins_cmd.app, name="plugins")
 app.add_typer(hooks_cmd.app, name="hooks")
 
 
-def _build_version_lines() -> list[str]:
-    """Build version output lines: reeln version, ffmpeg info, plugins."""
-    lines: list[str] = [f"reeln {__version__}"]
-
-    # FFmpeg info
-    try:
-        from reeln.core.ffmpeg import check_version, discover_ffmpeg
-
-        ffmpeg_path = discover_ffmpeg()
-        version = check_version(ffmpeg_path)
-        lines.append(f"ffmpeg {version} ({ffmpeg_path})")
-    except Exception:
-        lines.append("ffmpeg: not found")
-
-    # Plugin versions
-    try:
-        from reeln.core.plugin_registry import get_installed_version
-        from reeln.plugins.loader import discover_plugins
-
-        plugins = discover_plugins()
-        plugin_lines: list[str] = []
-        for p in plugins:
-            if p.package:
-                ver = get_installed_version(p.package)
-                if ver:
-                    plugin_lines.append(f"  {p.name} {ver}")
-        if plugin_lines:
-            lines.append("plugins:")
-            lines.extend(plugin_lines)
-    except Exception:
-        pass
-
-    return lines
-
-
 def _version_callback(value: bool) -> None:
     if value:
-        for line in _build_version_lines():
-            typer.echo(line)
+        from reeln.commands.style import bold, error, label, success
+
+        typer.echo(f"  {bold('reeln')}  {success(__version__)}")
+
+        # FFmpeg info
+        try:
+            from reeln.core.ffmpeg import check_version, discover_ffmpeg
+
+            ffmpeg_path = discover_ffmpeg()
+            version = check_version(ffmpeg_path)
+            typer.echo(f"  {bold('ffmpeg')}  {version}  {label(str(ffmpeg_path))}")
+        except Exception:
+            typer.echo(f"  {bold('ffmpeg')}  {error('not found')}")
+
+        # Plugin versions
+        try:
+            from reeln.core.plugin_registry import get_installed_version
+            from reeln.plugins.loader import discover_plugins
+
+            plugins = discover_plugins()
+            plugin_lines: list[str] = []
+            for p in plugins:
+                if p.package:
+                    ver = get_installed_version(p.package)
+                    if ver:
+                        plugin_lines.append(f"    {p.name}  {label(ver)}")
+            if plugin_lines:
+                typer.echo(f"  {bold('plugins:')}")
+                for pl in plugin_lines:
+                    typer.echo(pl)
+        except Exception:
+            pass
+
         raise typer.Exit()
 
 

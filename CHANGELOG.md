@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.37] - 2026-04-03
+
+### Added
+- `reeln game list` — list games in output directory with status badges (finished/in progress)
+- `reeln game info` — show detailed game information (teams, venue, progress, livestreams)
+- `reeln game delete` — delete a game directory with confirmation prompt (`--force` to skip)
+- Colored CLI output: `--version`, `plugins list`, `plugins search`, `plugins info`, `plugins inputs`, `game list`, `game info`, `game delete` all use consistent styled output (bold names, green/red/yellow badges, dim labels)
+- Shared `reeln.commands.style` module for consistent CLI formatting
+- Plugin Input Contributions: plugins declare additional user inputs via `input_schema` class attribute (`PluginInputSchema`, `InputField`)
+- `--plugin-input KEY=VALUE` (`-I`) repeatable option on `game init`, `render short`, and `render preview`
+- Interactive prompts for plugin-contributed inputs (questionary-based, preset-first pattern)
+- Conditional prompting: `thumbnail` and `tournament` only prompted when a plugin declares them
+- `InputCollector` with conflict resolution (same-type dedup, cross-type namespacing)
+- `get_input_schema()` method support: plugins can conditionally declare inputs based on feature flags (e.g., only prompt for thumbnail when `create_livestream` is enabled)
+- Registry fallback: plugins without `input_schema` / `get_input_schema()` get inputs from `ui_contributions.input_fields` in registry JSON
+- `reeln plugins inputs` introspection command (text + JSON output for reeln-dock)
+- `input_contributions` field on `RegistryEntry` model, parsed from `ui_contributions.input_fields`
+- Google plugin registry entry updated with `thumbnail_image` input field for `game_init`
+
+### Changed
+- `init_game()` accepts `plugin_inputs` kwarg, included in `ON_GAME_INIT` / `ON_GAME_READY` hook data
+- `PRE_RENDER` / `POST_RENDER` hook data includes `plugin_inputs` when present
+- `activate_plugins()` now registers plugin input schemas with the `InputCollector` singleton
+- `game init` checks for unfinished games **before** interactive prompts (fail fast instead of prompting then failing)
+- `_resolve_game_dir` now sorts by `created_at` from `game.json` instead of filesystem mtime (which is unreliable due to Spotlight/Time Machine)
+- `_resolve_game_dir` prefers unfinished games over finished ones, so `reeln game finish` finds the right game
+
 ## [0.0.36] - 2026-04-02
 
 ### Fixed

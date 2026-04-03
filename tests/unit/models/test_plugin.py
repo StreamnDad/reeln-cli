@@ -278,3 +278,86 @@ def test_registry_entry_to_dict_defaults() -> None:
     assert d["capabilities"] == []
     assert d["author"] == ""
     assert d["license"] == ""
+    assert "input_contributions" not in d
+
+
+# ---------------------------------------------------------------------------
+# input_contributions parsing
+# ---------------------------------------------------------------------------
+
+
+def test_dict_to_registry_entry_with_input_contributions() -> None:
+    data: dict[str, object] = {
+        "name": "google",
+        "ui_contributions": {
+            "input_fields": {
+                "game_init": [
+                    {
+                        "id": "thumbnail_image",
+                        "label": "Thumbnail Image",
+                        "type": "file",
+                        "required": False,
+                        "description": "Thumbnail for livestream",
+                    }
+                ]
+            }
+        },
+    }
+    entry = dict_to_registry_entry(data)
+    assert "game_init" in entry.input_contributions
+    assert len(entry.input_contributions["game_init"]) == 1
+    assert entry.input_contributions["game_init"][0]["id"] == "thumbnail_image"
+
+
+def test_dict_to_registry_entry_no_ui_contributions() -> None:
+    entry = dict_to_registry_entry({"name": "plain"})
+    assert entry.input_contributions == {}
+
+
+def test_dict_to_registry_entry_ui_contributions_no_input_fields() -> None:
+    data: dict[str, object] = {
+        "name": "openai",
+        "ui_contributions": {"render_options": {"fields": []}},
+    }
+    entry = dict_to_registry_entry(data)
+    assert entry.input_contributions == {}
+
+
+def test_dict_to_registry_entry_input_fields_non_list_ignored() -> None:
+    """Non-list values under input_fields are silently skipped."""
+    data: dict[str, object] = {
+        "name": "weird",
+        "ui_contributions": {
+            "input_fields": {
+                "game_init": "not a list",
+                "render_short": [{"id": "x", "type": "str"}],
+            }
+        },
+    }
+    entry = dict_to_registry_entry(data)
+    assert "game_init" not in entry.input_contributions
+    assert "render_short" in entry.input_contributions
+
+
+def test_dict_to_registry_entry_input_fields_non_dict_items_filtered() -> None:
+    """Non-dict items within a field list are filtered out."""
+    data: dict[str, object] = {
+        "name": "weird",
+        "ui_contributions": {
+            "input_fields": {
+                "game_init": [{"id": "ok", "type": "str"}, "not a dict", 42],
+            }
+        },
+    }
+    entry = dict_to_registry_entry(data)
+    assert len(entry.input_contributions["game_init"]) == 1
+    assert entry.input_contributions["game_init"][0]["id"] == "ok"
+
+
+def test_registry_entry_to_dict_with_input_contributions() -> None:
+    entry = RegistryEntry(
+        name="google",
+        input_contributions={"game_init": [{"id": "thumb", "type": "file"}]},
+    )
+    d = registry_entry_to_dict(entry)
+    assert d["input_contributions"] == {"game_init": [{"id": "thumb", "type": "file"}]}

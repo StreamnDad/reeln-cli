@@ -26,6 +26,13 @@ def test_help_shows_all_groups() -> None:
     assert "plugins" in result.output
 
 
+def _unstyle(text: str) -> str:
+    """Strip ANSI escape codes for assertion matching."""
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
 def test_version() -> None:
     with (
         patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
@@ -34,8 +41,12 @@ def test_version() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert f"reeln {__version__}" in result.output
-    assert "ffmpeg 7.1 (/usr/bin/ffmpeg)" in result.output
+    plain = _unstyle(result.output)
+    assert "reeln" in plain
+    assert __version__ in plain
+    assert "ffmpeg" in plain
+    assert "7.1" in plain
+    assert "/usr/bin/ffmpeg" in plain
 
 
 def test_version_ffmpeg_not_found() -> None:
@@ -45,8 +56,10 @@ def test_version_ffmpeg_not_found() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert f"reeln {__version__}" in result.output
-    assert "ffmpeg: not found" in result.output
+    plain = _unstyle(result.output)
+    assert "reeln" in plain
+    assert __version__ in plain
+    assert "not found" in plain
 
 
 def test_version_with_plugins() -> None:
@@ -64,9 +77,12 @@ def test_version_with_plugins() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "plugins:" in result.output
-    assert "  scoreboard 1.2.0" in result.output
-    assert "  youtube 0.3.1" in result.output
+    plain = _unstyle(result.output)
+    assert "plugins:" in plain
+    assert "scoreboard" in plain
+    assert "1.2.0" in plain
+    assert "youtube" in plain
+    assert "0.3.1" in plain
 
 
 def test_version_no_plugins() -> None:
@@ -77,7 +93,8 @@ def test_version_no_plugins() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "plugins:" not in result.output
+    plain = _unstyle(result.output)
+    assert "plugins:" not in plain
 
 
 def test_version_plugin_discovery_error() -> None:
@@ -88,8 +105,10 @@ def test_version_plugin_discovery_error() -> None:
     ):
         result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert f"reeln {__version__}" in result.output
-    assert "plugins:" not in result.output
+    plain = _unstyle(result.output)
+    assert "reeln" in plain
+    assert __version__ in plain
+    assert "plugins:" not in plain
 
 
 def test_version_plugin_no_package_or_no_version() -> None:

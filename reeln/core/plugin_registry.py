@@ -462,3 +462,73 @@ def update_all_plugins(
             result = update_plugin(plugin.name, entries, dry_run=dry_run, installer=installer)
             results.append(result)
     return results
+
+
+def _detect_uninstaller() -> list[str]:
+    """Detect the best available uninstaller targeting the running environment."""
+    if shutil.which("uv"):
+        return ["uv", "pip", "uninstall", "--python", sys.executable]
+    return [sys.executable, "-m", "pip", "uninstall", "-y"]
+
+
+def uninstall_plugin(
+    name: str,
+    entries: list[RegistryEntry],
+    *,
+    dry_run: bool = False,
+    installer: str = "",
+) -> PipResult:
+    """Uninstall a plugin by name using the registry to resolve the package."""
+    entry = _resolve_entry(name, entries)
+
+    if installer == "uv":
+        cmd = ["uv", "pip", "uninstall"]
+    elif installer == "pip":
+        cmd = [sys.executable, "-m", "pip", "uninstall", "-y"]
+    else:
+        cmd = _detect_uninstaller()
+
+    full_cmd = [*cmd, entry.package]
+
+    if dry_run:
+        return PipResult(
+            success=True,
+            package=entry.package,
+            action="dry-run",
+            output=f"Would run: {' '.join(full_cmd)}",
+        )
+
+    try:
+        proc = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if proc.returncode == 0:
+            return PipResult(
+                success=True,
+                package=entry.package,
+                action="uninstall",
+                output=proc.stdout,
+            )
+        return PipResult(
+            success=False,
+            package=entry.package,
+            action="uninstall",
+            error=proc.stderr,
+        )
+    except subprocess.TimeoutExpired:
+        return PipResult(
+            success=False,
+            package=entry.package,
+            action="uninstall",
+            error="Uninstall timed out",
+        )
+    except Exception as exc:
+        return PipResult(
+            success=False,
+            package=entry.package,
+            action="uninstall",
+            error=str(exc),
+        )

@@ -706,3 +706,211 @@ def test_detect_capabilities_includes_doctor() -> None:
 
     caps = _detect_capabilities(PluginWithDoctor())
     assert "doctor" in caps
+
+
+def test_detect_capabilities_includes_inputs() -> None:
+    """Plugins with input_schema are detected as having the inputs capability."""
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+
+    class PluginWithInputs:
+        name = "test"
+        input_schema = PluginInputSchema(fields=(InputField(id="x", label="X", field_type="str", command="game_init"),))
+
+    caps = _detect_capabilities(PluginWithInputs())
+    assert "inputs" in caps
+
+
+def test_detect_capabilities_no_inputs_without_schema() -> None:
+    """input_schema that isn't a PluginInputSchema doesn't count."""
+
+    class PluginBadSchema:
+        name = "test"
+        input_schema = "not a schema"
+
+    caps = _detect_capabilities(PluginBadSchema())
+    assert "inputs" not in caps
+
+
+def test_activate_plugins_registry_input_fallback() -> None:
+    """Plugins without input_schema get inputs from registry fallback."""
+    from reeln.models.plugin import RegistryEntry
+    from reeln.plugins.inputs import get_input_collector
+
+    entries = [
+        RegistryEntry(
+            name="test",
+            input_contributions={
+                "game_init": [{"id": "thumb", "label": "Thumbnail", "type": "file"}]
+            },
+        ),
+    ]
+
+    ep = _make_entry_point("test", _NoConfigPlugin)
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch("reeln.core.plugin_registry.fetch_registry", return_value=entries),
+    ):
+        activate_plugins(PluginsConfig(enabled=["test"]))
+
+    collector = get_input_collector()
+    fields = collector.fields_for_command("game_init")
+    assert len(fields) == 1
+    assert fields[0].id == "thumb"
+    assert fields[0].plugin_name == "test"
+    reset_registry()
+
+
+def test_activate_plugins_class_input_wins_over_registry() -> None:
+    """Class-level input_schema takes precedence over registry fallback."""
+    from reeln.models.plugin import RegistryEntry
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import get_input_collector
+
+    class PluginWithInputs:
+        input_schema = PluginInputSchema(
+            fields=(InputField(id="thumb", label="From Class", field_type="file", command="game_init"),)
+        )
+
+    entries = [
+        RegistryEntry(
+            name="google",
+            input_contributions={
+                "game_init": [{"id": "thumb", "label": "From Registry", "type": "file"}]
+            },
+        ),
+    ]
+
+    ep = _make_entry_point("google", type(PluginWithInputs()))
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch("reeln.core.plugin_registry.fetch_registry", return_value=entries),
+    ):
+        activate_plugins(PluginsConfig(enabled=["google"]))
+
+    collector = get_input_collector()
+    fields = collector.fields_for_command("game_init")
+    assert len(fields) == 1
+    assert fields[0].label == "From Class"
+    reset_registry()
+
+
+def test_activate_plugins_registry_input_skips_unloaded() -> None:
+    """Registry input_contributions for unloaded plugins are skipped."""
+    from reeln.models.plugin import RegistryEntry
+    from reeln.plugins.inputs import get_input_collector
+
+    entries = [
+        RegistryEntry(
+            name="not_loaded",
+            input_contributions={
+                "game_init": [{"id": "thumb", "label": "T", "type": "file"}]
+            },
+        ),
+    ]
+
+    with (
+        patch("reeln.plugins.loader.discover_plugins", return_value=[]),
+        patch("reeln.core.plugin_registry.fetch_registry", return_value=entries),
+    ):
+        activate_plugins(PluginsConfig())
+
+    collector = get_input_collector()
+    assert collector.fields_for_command("game_init") == []
+    reset_registry()
+
+
+def test_fetch_registry_input_contributions_failure() -> None:
+    """Registry fetch failure returns empty dict."""
+    from reeln.plugins.loader import _fetch_registry_input_contributions
+
+    with patch(
+        "reeln.core.plugin_registry.fetch_registry",
+        side_effect=Exception("network error"),
+    ):
+        result = _fetch_registry_input_contributions("https://example.com/registry.json")
+    assert result == {}
+
+
+def test_fetch_registry_input_contributions_success() -> None:
+    """Fetches and returns input_contributions from registry entries."""
+    from reeln.models.plugin import RegistryEntry
+    from reeln.plugins.loader import _fetch_registry_input_contributions
+
+    entries = [
+        RegistryEntry(
+            name="google",
+            input_contributions={"game_init": [{"id": "thumb", "type": "file"}]},
+        ),
+        RegistryEntry(name="plain"),  # no contributions
+    ]
+    with patch("reeln.core.plugin_registry.fetch_registry", return_value=entries):
+        result = _fetch_registry_input_contributions("https://example.com/registry.json")
+    assert "google" in result
+    assert "plain" not in result
+
+
+def test_detect_capabilities_inputs_via_method() -> None:
+    """Plugins with get_input_schema() method are detected as having inputs capability."""
+
+    class PluginWithMethod:
+        name = "test"
+
+        def get_input_schema(self) -> object:
+            return None  # pragma: no cover
+
+    caps = _detect_capabilities(PluginWithMethod())
+    assert "inputs" in caps
+
+
+# ---------------------------------------------------------------------------
+# activate_plugins registers plugin inputs
+# ---------------------------------------------------------------------------
+
+
+def test_activate_plugins_registers_input_schema() -> None:
+    """activate_plugins() populates the InputCollector with plugin input_schema."""
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import get_input_collector
+
+    class PluginWithInputs:
+        input_schema = PluginInputSchema(
+            fields=(InputField(id="thumb", label="Thumbnail", field_type="file", command="game_init"),)
+        )
+
+    ep = _make_entry_point("google", type(PluginWithInputs()))
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch("reeln.plugins.loader._fetch_registry_input_contributions", return_value={}),
+    ):
+        activate_plugins(PluginsConfig(enabled=["google"]))
+
+    collector = get_input_collector()
+    fields = collector.fields_for_command("game_init")
+    assert len(fields) == 1
+    assert fields[0].id == "thumb"
+    assert fields[0].plugin_name == "google"
+    reset_registry()
+
+
+def test_activate_plugins_clears_input_collector_on_reactivation() -> None:
+    """Double activation doesn't accumulate inputs."""
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import get_input_collector
+
+    class PluginWithInputs:
+        input_schema = PluginInputSchema(
+            fields=(InputField(id="thumb", label="Thumbnail", field_type="file", command="game_init"),)
+        )
+
+    ep = _make_entry_point("google", type(PluginWithInputs()))
+    with (
+        patch("reeln.plugins.loader.importlib.metadata.entry_points", return_value=[ep]),
+        patch("reeln.plugins.loader._fetch_registry_input_contributions", return_value={}),
+    ):
+        activate_plugins(PluginsConfig(enabled=["google"]))
+        activate_plugins(PluginsConfig(enabled=["google"]))
+
+    collector = get_input_collector()
+    fields = collector.fields_for_command("game_init")
+    assert len(fields) == 1  # Not 2
+    reset_registry()

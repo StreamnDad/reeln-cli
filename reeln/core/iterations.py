@@ -125,10 +125,13 @@ def render_iterations(
                 iter_dur = source_dur
                 if profile.speed_segments is not None:
                     iter_dur = compute_speed_segments_duration(
-                        profile.speed_segments, source_dur,
+                        profile.speed_segments,
+                        source_dur,
                     )
                 ctx = build_overlay_context(
-                    base_ctx, duration=iter_dur, event_metadata=event_metadata,
+                    base_ctx,
+                    duration=iter_dur,
+                    event_metadata=event_metadata,
                 )
 
             # Resolve subtitle template
@@ -158,7 +161,8 @@ def render_iterations(
                     from reeln.core.zoom import remap_zoom_path_for_speed_segments
 
                     iter_zoom = remap_zoom_path_for_speed_segments(
-                        iter_zoom, modified.speed_segments,
+                        iter_zoom,
+                        modified.speed_segments,
                     )
                 plan = plan_short(modified, zoom_path=iter_zoom, source_fps=source_fps)
             else:
