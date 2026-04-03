@@ -57,11 +57,16 @@ def test_all_matches_expected() -> None:
         "HookContext",
         "HookHandler",
         "HookRegistry",
+        "InputCollector",
+        "InputField",
         "MetadataEnricher",
         "Notifier",
+        "PluginInputSchema",
         "Uploader",
         "activate_plugins",
+        "get_input_collector",
         "get_registry",
+        "reset_input_collector",
         "reset_registry",
     }
     assert set(plugins.__all__) == expected

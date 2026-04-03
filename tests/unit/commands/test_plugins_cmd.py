@@ -32,7 +32,7 @@ def test_plugins_list_no_plugins_no_registry() -> None:
     ):
         result = runner.invoke(app, ["plugins", "list"])
     assert result.exit_code == 0
-    assert "No plugins installed or available" in result.output
+    assert "No plugins installed" in result.output
 
 
 def test_plugins_list_shows_installed() -> None:
@@ -45,6 +45,7 @@ def test_plugins_list_shows_installed() -> None:
             enabled=True,
             capabilities=["uploader"],
             update_available=True,
+            description="YouTube video uploader",
         ),
         PluginStatus(
             name="llm",
@@ -65,11 +66,11 @@ def test_plugins_list_shows_installed() -> None:
     assert "youtube" in result.output
     assert "1.0.0" in result.output
     assert "1.1.0" in result.output
-    assert "uploader" in result.output
     assert "llm" in result.output
 
 
-def test_plugins_list_shows_not_installed() -> None:
+def test_plugins_list_hides_not_installed() -> None:
+    """Uninstalled plugins are not shown in list — use search instead."""
     statuses = [
         PluginStatus(name="meta", installed=False, capabilities=["uploader"]),
     ]
@@ -81,7 +82,8 @@ def test_plugins_list_shows_not_installed() -> None:
     ):
         result = runner.invoke(app, ["plugins", "list"])
     assert result.exit_code == 0
-    assert "not installed" in result.output
+    assert "meta" not in result.output
+    assert "No plugins installed" in result.output
 
 
 def test_plugins_list_registry_error_graceful() -> None:
@@ -133,6 +135,7 @@ def test_plugins_search_all() -> None:
     entries = [
         RegistryEntry(name="youtube", package="reeln-youtube", description="YouTube uploader"),
         RegistryEntry(name="llm", package="reeln-llm", description="LLM enricher"),
+        RegistryEntry(name="bare", package="reeln-bare"),
     ]
     with (
         patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
@@ -740,6 +743,7 @@ def test_plugins_info_shows_schema() -> None:
             name="youtube",
             package="reeln-youtube",
             description="YouTube uploader",
+            homepage="https://github.com/example/reeln-youtube",
         ),
     ]
     with (
@@ -750,12 +754,13 @@ def test_plugins_info_shows_schema() -> None:
     ):
         result = runner.invoke(app, ["plugins", "info", "youtube"])
     assert result.exit_code == 0
-    assert "Config schema:" in result.output
+    assert "Settings:" in result.output
     assert "api_key" in result.output
     assert "(required)" in result.output
     assert "region" in result.output
-    assert "[default: us-east-1]" in result.output
+    assert "us-east-1" in result.output
     assert "API key" in result.output
+    assert "Homepage:" in result.output
 
 
 def test_plugins_info_no_schema() -> None:
@@ -770,7 +775,8 @@ def test_plugins_info_no_schema() -> None:
     ):
         result = runner.invoke(app, ["plugins", "info", "youtube"])
     assert result.exit_code == 0
-    assert "Config schema: none declared" in result.output
+    # No settings section when schema is None
+    assert "Settings:" not in result.output
 
 
 def test_plugins_info_shows_required_field() -> None:
@@ -787,3 +793,239 @@ def test_plugins_info_shows_required_field() -> None:
         result = runner.invoke(app, ["plugins", "info", "meta"])
     assert "token: str (required)" in result.output
     assert "Auth token" in result.output
+
+
+# ---------------------------------------------------------------------------
+# plugins uninstall
+# ---------------------------------------------------------------------------
+
+
+def test_plugins_uninstall_success() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    pip_result = PipResult(success=True, package="reeln-plugin-google", action="uninstall")
+    config = AppConfig(plugins=PluginsConfig(enabled=["google"]))
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=config),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value="1.0.0"),
+        patch("reeln.commands.plugins_cmd.uninstall_plugin", return_value=pip_result),
+        patch("reeln.commands.plugins_cmd.save_config") as mock_save,
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google", "--force"])
+    assert result.exit_code == 0
+    assert "uninstalled" in result.output
+    mock_save.assert_called_once()
+    saved_config = mock_save.call_args[0][0]
+    assert "google" not in saved_config.plugins.enabled
+    assert "google" in saved_config.plugins.disabled
+
+
+def test_plugins_uninstall_not_installed() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value=""),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google", "--force"])
+    assert result.exit_code == 1
+    assert "not installed" in result.output
+
+
+def test_plugins_uninstall_cancelled() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value="1.0.0"),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google"], input="n\n")
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output
+
+
+def test_plugins_uninstall_confirmed() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    pip_result = PipResult(success=True, package="reeln-plugin-google", action="uninstall")
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value="1.0.0"),
+        patch("reeln.commands.plugins_cmd.uninstall_plugin", return_value=pip_result),
+        patch("reeln.commands.plugins_cmd.save_config"),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google"], input="y\n")
+    assert result.exit_code == 0
+    assert "uninstalled" in result.output
+
+
+def test_plugins_uninstall_dry_run() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    pip_result = PipResult(success=True, package="reeln-plugin-google", action="dry-run", output="Would run: uv pip uninstall reeln-plugin-google")
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value="1.0.0"),
+        patch("reeln.commands.plugins_cmd.uninstall_plugin", return_value=pip_result),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google", "--dry-run"])
+    assert result.exit_code == 0
+    assert "Would run" in result.output
+
+
+def test_plugins_uninstall_failure() -> None:
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    pip_result = PipResult(success=False, package="reeln-plugin-google", action="uninstall", error="permission denied")
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),
+        patch("reeln.commands.plugins_cmd.get_installed_version", return_value="1.0.0"),
+        patch("reeln.commands.plugins_cmd.uninstall_plugin", return_value=pip_result),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google", "--force"])
+    assert result.exit_code == 1
+    assert "permission denied" in result.output
+
+
+def test_plugins_uninstall_registry_error() -> None:
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.commands.plugins_cmd.fetch_registry", side_effect=RegistryError("offline")),
+    ):
+        result = runner.invoke(app, ["plugins", "uninstall", "google", "--force"])
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# plugins inputs
+# ---------------------------------------------------------------------------
+
+
+def test_plugins_inputs_no_plugins() -> None:
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.discover_plugins", return_value=[]),
+    ):
+        result = runner.invoke(app, ["plugins", "inputs"])
+    assert result.exit_code == 0
+    assert "No plugin input contributions" in result.output
+
+
+def test_plugins_inputs_with_fields() -> None:
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import reset_input_collector
+
+    class FakePlugin:
+        input_schema = PluginInputSchema(
+            fields=(
+                InputField(
+                    id="thumb",
+                    label="Thumbnail",
+                    field_type="file",
+                    command="game_init",
+                    plugin_name="google",
+                    description="Thumbnail for livestream",
+                ),
+            )
+        )
+
+    def _fake_activate(cfg: object) -> dict[str, object]:
+        collector = reset_input_collector()
+        p = FakePlugin()
+        collector.register_plugin_inputs(p, "google")
+        return {"google": p}
+
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", side_effect=_fake_activate),
+    ):
+        result = runner.invoke(app, ["plugins", "inputs", "--command", "game_init"])
+    assert result.exit_code == 0
+    assert "game_init" in result.output
+    assert "thumb" in result.output
+    assert "google" in result.output
+    assert "Thumbnail for livestream" in result.output
+
+
+def test_plugins_inputs_json_output() -> None:
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import reset_input_collector
+
+    class FakePlugin:
+        input_schema = PluginInputSchema(
+            fields=(
+                InputField(
+                    id="thumb",
+                    label="Thumbnail",
+                    field_type="file",
+                    command="game_init",
+                    plugin_name="google",
+                ),
+            )
+        )
+
+    def _fake_activate(cfg: object) -> dict[str, object]:
+        collector = reset_input_collector()
+        p = FakePlugin()
+        collector.register_plugin_inputs(p, "google")
+        return {"google": p}
+
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", side_effect=_fake_activate),
+    ):
+        result = runner.invoke(app, ["plugins", "inputs", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data["fields"]) == 1
+    assert data["fields"][0]["id"] == "thumb"
+
+
+def test_plugins_inputs_all_commands() -> None:
+    """Without --command, all command scopes are queried."""
+    from reeln.plugins.inputs import reset_input_collector
+
+    def _fake_activate(cfg: object) -> dict[str, object]:
+        reset_input_collector()
+        return {}
+
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", side_effect=_fake_activate),
+    ):
+        result = runner.invoke(app, ["plugins", "inputs"])
+    assert result.exit_code == 0
+    assert "No plugin input contributions" in result.output
+
+
+def test_plugins_inputs_required_field() -> None:
+    from reeln.models.plugin_input import InputField, PluginInputSchema
+    from reeln.plugins.inputs import reset_input_collector
+
+    class FakePlugin:
+        input_schema = PluginInputSchema(
+            fields=(
+                InputField(
+                    id="api_key",
+                    label="API Key",
+                    field_type="str",
+                    command="game_init",
+                    plugin_name="test",
+                    required=True,
+                ),
+            )
+        )
+
+    def _fake_activate(cfg: object) -> dict[str, object]:
+        collector = reset_input_collector()
+        p = FakePlugin()
+        collector.register_plugin_inputs(p, "test")
+        return {"test": p}
+
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", side_effect=_fake_activate),
+    ):
+        result = runner.invoke(app, ["plugins", "inputs", "--command", "game_init"])
+    assert result.exit_code == 0
+    assert "(required)" in result.output

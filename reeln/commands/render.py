@@ -264,6 +264,7 @@ def _do_short(
     player_numbers: str | None = None,
     event_type: str | None = None,
     no_branding: bool = False,
+    plugin_input: list[str] | None = None,
 ) -> None:
     """Shared implementation for short and preview commands."""
     from reeln.core.ffmpeg import discover_ffmpeg
@@ -277,6 +278,13 @@ def _do_short(
         raise typer.Exit(code=1) from exc
 
     activate_plugins(config.plugins)
+
+    # Collect plugin-contributed inputs
+    from reeln.plugins.inputs import get_input_collector as _get_input_collector
+
+    _input_collector = _get_input_collector()
+    _render_command = "render_preview" if is_preview else "render_short"
+    _plugin_inputs = _input_collector.collect_noninteractive(_render_command, plugin_input or [])
 
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
@@ -501,9 +509,7 @@ def _do_short(
             if isinstance(smart_zoom_data, dict):
                 zoom_error = smart_zoom_data.get("error")
                 if zoom_error is not None:
-                    raise RenderError(
-                        f"Smart zoom analysis failed after retries: {zoom_error}"
-                    )
+                    raise RenderError(f"Smart zoom analysis failed after retries: {zoom_error}")
                 zoom_path = smart_zoom_data.get("zoom_path")
                 debug_from_plugin = smart_zoom_data.get("debug")
                 if isinstance(debug_from_plugin, dict):
@@ -569,8 +575,7 @@ def _do_short(
             profile_list = profiles_for_event(config, render_game_event)
             if profile_list:
                 iter_ctx: TemplateContext | None = (
-                    build_base_context(render_game_info, render_game_event)
-                    if render_game_info else None
+                    build_base_context(render_game_info, render_game_event) if render_game_info else None
                 )
                 if player is not None and iter_ctx is not None:
                     iter_ctx = TemplateContext(variables={**iter_ctx.variables, "player": player})
@@ -663,9 +668,12 @@ def _do_short(
         from reeln.plugins.hooks import HookContext as _RHookCtx
         from reeln.plugins.registry import get_registry as _get_reg
 
+        _pre_data: dict[str, Any] = {"plan": plan}
+        if _plugin_inputs:
+            _pre_data["plugin_inputs"] = _plugin_inputs
         _get_reg().emit(
             _RHook.PRE_RENDER,
-            _RHookCtx(hook=_RHook.PRE_RENDER, data={"plan": plan}),
+            _RHookCtx(hook=_RHook.PRE_RENDER, data=_pre_data),
         )
         try:
             ffmpeg_path = discover_ffmpeg()
@@ -684,6 +692,8 @@ def _do_short(
             _post_data["player"] = player
         if assists is not None:
             _post_data["assists"] = assists
+        if _plugin_inputs:
+            _post_data["plugin_inputs"] = _plugin_inputs
         _get_reg().emit(
             _RHook.POST_RENDER,
             _RHookCtx(hook=_RHook.POST_RENDER, data=_post_data),
@@ -806,6 +816,7 @@ def short(
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     no_branding: bool = typer.Option(False, "--no-branding", help="Disable branding overlay."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
+    plugin_input: list[str] = typer.Option([], "--plugin-input", "-I", help="Plugin input as KEY=VALUE (repeatable)."),
 ) -> None:
     """Render a 9:16 short from a clip."""
     _do_short(
@@ -836,6 +847,7 @@ def short(
         player_numbers=player_numbers_str,
         event_type=event_type,
         no_branding=no_branding,
+        plugin_input=plugin_input,
     )
 
 
@@ -877,6 +889,7 @@ def preview(
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     no_branding: bool = typer.Option(False, "--no-branding", help="Disable branding overlay."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
+    plugin_input: list[str] = typer.Option([], "--plugin-input", "-I", help="Plugin input as KEY=VALUE (repeatable)."),
 ) -> None:
     """Fast low-res preview render."""
     _do_short(
@@ -906,6 +919,7 @@ def preview(
         player_numbers=player_numbers_str,
         event_type=event_type,
         no_branding=no_branding,
+        plugin_input=plugin_input,
     )
 
 
@@ -1113,10 +1127,7 @@ def apply_profile(
     rendered_subtitle: Path | None = None
     try:
         if rp.subtitle_template is not None:
-            ctx = (
-                build_base_context(apply_game_info, apply_game_event)
-                if apply_game_info else TemplateContext()
-            )
+            ctx = build_base_context(apply_game_info, apply_game_event) if apply_game_info else TemplateContext()
             if player_name is not None:
                 ctx = TemplateContext(variables={**ctx.variables, "player": player_name})
 

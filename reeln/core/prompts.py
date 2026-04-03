@@ -327,7 +327,20 @@ def collect_game_info_interactive(
     result["game_time"] = prompt_game_time(preset=game_time)
     result["period_length"] = prompt_period_length(preset=period_length)
     result["description"] = prompt_description(preset=description)
-    result["thumbnail"] = prompt_thumbnail(preset=thumbnail)
-    result["tournament"] = prompt_tournament(preset=tournament)
+
+    # Thumbnail and tournament are only prompted when a plugin declares the
+    # corresponding input ID, or when a preset was provided via CLI arg.
+    from reeln.plugins.inputs import get_input_collector
+
+    collector = get_input_collector()
+    if thumbnail is not None or collector.has_field("game_init", "thumbnail_image"):
+        result["thumbnail"] = prompt_thumbnail(preset=thumbnail)
+    else:
+        result["thumbnail"] = thumbnail or ""
+
+    if tournament is not None or collector.has_field("game_init", "tournament"):
+        result["tournament"] = prompt_tournament(preset=tournament)
+    else:
+        result["tournament"] = tournament or ""
 
     return result

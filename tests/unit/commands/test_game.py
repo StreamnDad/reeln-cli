@@ -52,17 +52,16 @@ def test_resolve_game_dir_direct(tmp_path: Path) -> None:
 
 
 def test_resolve_game_dir_discovers_latest(tmp_path: Path) -> None:
-    """When resolved path is the parent, discover the latest game dir."""
-    import time
+    """When resolved path is the parent, discover the latest game dir by created_at."""
+    import json
 
     old_game = tmp_path / "2026-01-01_a_vs_b"
     old_game.mkdir()
-    (old_game / "game.json").write_text("{}")
-    time.sleep(0.05)
+    (old_game / "game.json").write_text(json.dumps({"created_at": "2026-01-01T00:00:00"}))
 
     new_game = tmp_path / "2026-02-28_c_vs_d"
     new_game.mkdir()
-    (new_game / "game.json").write_text("{}")
+    (new_game / "game.json").write_text(json.dumps({"created_at": "2026-02-28T00:00:00"}))
 
     result = _resolve_game_dir(tmp_path, None)
     assert result == new_game
@@ -86,6 +85,89 @@ def test_resolve_game_dir_skips_non_game_dirs(tmp_path: Path) -> None:
     assert result == game
 
 
+def test_resolve_game_dir_prefers_unfinished(tmp_path: Path) -> None:
+    """Unfinished games are preferred over finished ones regardless of timestamp."""
+    import json
+
+    finished = tmp_path / "2026-03-15_a_vs_b"
+    finished.mkdir()
+    (finished / "game.json").write_text(json.dumps({
+        "finished": True,
+        "created_at": "2026-03-15T18:00:00",
+    }))
+
+    unfinished = tmp_path / "2026-03-10_c_vs_d"
+    unfinished.mkdir()
+    (unfinished / "game.json").write_text(json.dumps({
+        "finished": False,
+        "created_at": "2026-03-10T12:00:00",
+    }))
+
+    result = _resolve_game_dir(tmp_path, None)
+    assert result == unfinished
+
+
+def test_resolve_game_dir_latest_unfinished_when_multiple(tmp_path: Path) -> None:
+    """When multiple unfinished games exist, pick the one with latest created_at."""
+    import json
+
+    older = tmp_path / "2026-03-01_a_vs_b"
+    older.mkdir()
+    (older / "game.json").write_text(json.dumps({
+        "finished": False,
+        "created_at": "2026-03-01T00:00:00",
+    }))
+
+    newer = tmp_path / "2026-03-10_c_vs_d"
+    newer.mkdir()
+    (newer / "game.json").write_text(json.dumps({
+        "finished": False,
+        "created_at": "2026-03-10T00:00:00",
+    }))
+
+    result = _resolve_game_dir(tmp_path, None)
+    assert result == newer
+
+
+def test_resolve_game_dir_falls_back_to_finished(tmp_path: Path) -> None:
+    """When all games are finished, pick the latest by created_at."""
+    import json
+
+    old = tmp_path / "2026-01-01_a_vs_b"
+    old.mkdir()
+    (old / "game.json").write_text(json.dumps({
+        "finished": True,
+        "created_at": "2026-01-01T00:00:00",
+    }))
+
+    new = tmp_path / "2026-02-01_c_vs_d"
+    new.mkdir()
+    (new / "game.json").write_text(json.dumps({
+        "finished": True,
+        "created_at": "2026-02-01T00:00:00",
+    }))
+
+    result = _resolve_game_dir(tmp_path, None)
+    assert result == new
+
+
+def test_resolve_game_dir_handles_bad_json(tmp_path: Path) -> None:
+    """Malformed game.json is treated as unfinished with empty created_at."""
+    good = tmp_path / "2026-02-01_a_vs_b"
+    good.mkdir()
+    (good / "game.json").write_text('{"created_at": "2026-02-01T00:00:00"}')
+
+    bad = tmp_path / "2026-03-01_c_vs_d"
+    bad.mkdir()
+    (bad / "game.json").write_text("not json")
+
+    result = _resolve_game_dir(tmp_path, None)
+    # bad json has empty created_at ("") which sorts before "2026-..."
+    # but it's treated as unfinished, so it's in the preferred pool
+    # Both are unfinished; good has a later-sorting created_at
+    assert result == good
+
+
 def test_resolve_game_dir_uses_config_output_dir(tmp_path: Path) -> None:
     """Falls through to config output_dir for discovery."""
     game = tmp_path / "2026-02-28_a_vs_b"
@@ -99,6 +181,9 @@ def test_resolve_game_dir_uses_config_output_dir(tmp_path: Path) -> None:
 def test_game_help_lists_commands() -> None:
     result = runner.invoke(app, ["game", "--help"])
     assert result.exit_code == 0
+    assert "list" in result.output
+    assert "info" in result.output
+    assert "delete" in result.output
     assert "init" in result.output
     assert "segment" in result.output
     assert "highlights" in result.output
@@ -258,6 +343,19 @@ def test_game_init_config_error_exits() -> None:
     assert "bad config" in result.output
 
 
+def test_game_init_unfinished_blocks_before_prompts(tmp_path: Path) -> None:
+    """Unfinished games are detected before interactive prompts begin."""
+    unfinished = tmp_path / "2026-01-01_a_vs_b"
+    unfinished.mkdir()
+    state = unfinished / "game.json"
+    state.write_text('{"finished": false}')
+
+    result = runner.invoke(app, ["game", "init", "-o", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Unfinished game(s)" in result.output
+    assert "reeln game finish" in result.output
+
+
 def test_game_init_help_shows_arguments() -> None:
     result = runner.invoke(app, ["game", "init", "--help"])
     assert result.exit_code == 0
@@ -340,9 +438,12 @@ def test_game_init_interactive_creates_directory_with_sport(tmp_path: Path) -> N
 
 
 def test_game_init_interactive_abort_exits() -> None:
-    with patch(
-        "reeln.commands.game.collect_game_info_interactive",
-        side_effect=PromptAborted("cancelled"),
+    with (
+        patch("reeln.commands.game.find_unfinished_games", return_value=[]),
+        patch(
+            "reeln.commands.game.collect_game_info_interactive",
+            side_effect=PromptAborted("cancelled"),
+        ),
     ):
         result = runner.invoke(app, ["game", "init"])
 
@@ -379,9 +480,12 @@ def test_game_init_interactive_passes_sport_preset(tmp_path: Path) -> None:
 
 def test_game_init_interactive_missing_questionary() -> None:
     """ReelnError from missing dependency shows clean error, not traceback."""
-    with patch(
-        "reeln.commands.game.collect_game_info_interactive",
-        side_effect=ReelnError("Interactive prompts require the 'questionary' package."),
+    with (
+        patch("reeln.commands.game.find_unfinished_games", return_value=[]),
+        patch(
+            "reeln.commands.game.collect_game_info_interactive",
+            side_effect=ReelnError("Interactive prompts require the 'questionary' package."),
+        ),
     ):
         result = runner.invoke(app, ["game", "init"])
 
@@ -2026,6 +2130,272 @@ def test_game_compile_debug_dry_run_skipped(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Debug:" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# game init — plugin inputs
+# ---------------------------------------------------------------------------
+
+
+def test_game_init_thumbnail_bridges_to_plugin_input(tmp_path: Path) -> None:
+    """--thumbnail value is bridged to plugin_inputs as thumbnail_image."""
+    from unittest.mock import ANY
+
+    captured_kwargs: dict[str, object] = {}
+
+    def _capture_init(base: object, info: object, **kw: object) -> tuple[Path, list[str]]:
+        captured_kwargs.update(kw)
+        return tmp_path / "game", ["ok"]
+
+    with (
+        patch("reeln.commands.game.init_game", side_effect=_capture_init),
+        patch("reeln.commands.game.load_config", return_value=AppConfig()),
+        patch("reeln.commands.game.activate_plugins"),
+    ):
+        result = runner.invoke(
+            app,
+            ["game", "init", "a", "b", "--thumbnail", "/path/thumb.jpg", "-o", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    pi = captured_kwargs.get("plugin_inputs")
+    assert pi is not None
+    assert pi["thumbnail_image"] == "/path/thumb.jpg"  # type: ignore[index]
+
+
+def test_game_init_plugin_input_flag(tmp_path: Path) -> None:
+    """--plugin-input KEY=VALUE is parsed and passed to init_game."""
+    captured_kwargs: dict[str, object] = {}
+
+    def _capture_init(base: object, info: object, **kw: object) -> tuple[Path, list[str]]:
+        captured_kwargs.update(kw)
+        return tmp_path / "game", ["ok"]
+
+    with (
+        patch("reeln.commands.game.init_game", side_effect=_capture_init),
+        patch("reeln.commands.game.load_config", return_value=AppConfig()),
+        patch("reeln.commands.game.activate_plugins"),
+    ):
+        result = runner.invoke(
+            app,
+            ["game", "init", "a", "b", "-I", "mykey=myval", "-o", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    pi = captured_kwargs.get("plugin_inputs")
+    assert pi is not None
+    assert pi["mykey"] == "myval"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# game list
+# ---------------------------------------------------------------------------
+
+
+def test_game_list_shows_games(tmp_path: Path) -> None:
+    import json as _json
+
+    g1 = tmp_path / "2026-03-15_a_vs_b"
+    g1.mkdir()
+    (g1 / "game.json").write_text(
+        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+    )
+    g2 = tmp_path / "2026-03-20_c_vs_d"
+    g2.mkdir()
+    (g2 / "game.json").write_text(
+        _json.dumps({"game_info": {"home_team": "Ducks", "away_team": "Hawks", "sport": "hockey", "date": "2026-03-20"}, "finished": False})
+    )
+
+    result = runner.invoke(app, ["game", "list", "-o", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Eagles vs Bears" in result.output
+    assert "Ducks vs Hawks" in result.output
+    assert "finished" in result.output
+    assert "in progress" in result.output
+
+
+def test_game_list_no_games(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["game", "list", "-o", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "No games found" in result.output
+
+
+def test_game_list_no_dir(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["game", "list", "-o", str(tmp_path / "nonexistent")])
+    assert result.exit_code == 0
+    assert "No games found" in result.output
+
+
+def test_game_list_config_error() -> None:
+    with patch("reeln.commands.game.load_config", side_effect=ReelnError("bad")):
+        result = runner.invoke(app, ["game", "list"])
+    assert result.exit_code == 1
+
+
+def test_game_list_bad_json(tmp_path: Path) -> None:
+    g = tmp_path / "2026-01-01_a_vs_b"
+    g.mkdir()
+    (g / "game.json").write_text("not json")
+    result = runner.invoke(app, ["game", "list", "-o", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "? vs ?" in result.output
+
+
+# ---------------------------------------------------------------------------
+# game info
+# ---------------------------------------------------------------------------
+
+
+def test_game_info_shows_details(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+                "venue": "OVAL",
+                "game_time": "7:00 PM",
+                "level": "11u",
+                "description": "Big game",
+            },
+            "finished": False,
+            "segments_processed": [1, 2],
+            "events": [{"id": "1", "clip": "c.mkv", "segment_number": 1}],
+            "renders": [],
+            "livestreams": {"google": "https://youtube.com/live/abc"},
+            "created_at": "2026-03-15T18:00:00",
+        })
+    )
+
+    result = runner.invoke(app, ["game", "info", "-o", str(game_dir)])
+    assert result.exit_code == 0
+    assert "Eagles vs Bears" in result.output
+    assert "hockey" in result.output
+    assert "OVAL" in result.output
+    assert "7:00 PM" in result.output
+    assert "11u" in result.output
+    assert "Big game" in result.output
+    assert "2 processed" in result.output
+    assert "1" in result.output  # 1 event
+    assert "google" in result.output
+    assert "youtube.com" in result.output
+
+
+def test_game_info_finished_with_tournament(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+                "tournament": "Stars Cup",
+            },
+            "finished": True,
+            "segments_processed": [],
+            "events": [],
+            "renders": [{"input": "a.mkv", "output": "a_short.mp4", "segment_number": 1, "format": "vertical", "crop_mode": "pad", "rendered_at": "2026-03-15T19:00:00"}],
+            "livestreams": {},
+            "created_at": "2026-03-15T18:00:00",
+            "finished_at": "2026-03-15T20:00:00",
+        })
+    )
+
+    result = runner.invoke(app, ["game", "info", "-o", str(game_dir)])
+    assert result.exit_code == 0
+    assert "finished" in result.output
+    assert "Stars Cup" in result.output
+    assert "2026-03-15T20:00:00" in result.output
+    assert "1" in result.output  # 1 render
+
+
+def test_game_info_minimal_state(tmp_path: Path) -> None:
+    """Info works with minimal game.json (no timestamps, no optional fields)."""
+    import json as _json
+
+    game_dir = tmp_path / "2026-01-01_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({
+            "game_info": {"home_team": "A", "away_team": "B", "sport": "generic", "date": "2026-01-01"},
+            "finished": False,
+        })
+    )
+    result = runner.invoke(app, ["game", "info", "-o", str(game_dir)])
+    assert result.exit_code == 0
+    assert "A vs B" in result.output
+    assert "Created:" not in result.output
+
+
+def test_game_info_config_error() -> None:
+    with patch("reeln.commands.game.load_config", side_effect=ReelnError("bad")):
+        result = runner.invoke(app, ["game", "info"])
+    assert result.exit_code == 1
+
+
+def test_game_delete_config_error() -> None:
+    with patch("reeln.commands.game.load_config", side_effect=ReelnError("bad")):
+        result = runner.invoke(app, ["game", "delete"])
+    assert result.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# game delete
+# ---------------------------------------------------------------------------
+
+
+def test_game_delete_with_force(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+    )
+
+    result = runner.invoke(app, ["game", "delete", "-o", str(game_dir), "--force"])
+    assert result.exit_code == 0
+    assert "Deleted" in result.output
+    assert not game_dir.exists()
+
+
+def test_game_delete_cancelled(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+    )
+
+    result = runner.invoke(app, ["game", "delete", "-o", str(game_dir)], input="n\n")
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output
+    assert game_dir.exists()
+
+
+def test_game_delete_confirmed(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+    )
+
+    result = runner.invoke(app, ["game", "delete", "-o", str(game_dir)], input="y\n")
+    assert result.exit_code == 0
+    assert "Deleted" in result.output
+    assert not game_dir.exists()
 
 
 # ---------------------------------------------------------------------------

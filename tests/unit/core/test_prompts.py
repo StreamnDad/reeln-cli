@@ -25,7 +25,24 @@ from reeln.core.prompts import (
     prompt_tournament,
     prompt_venue,
 )
+from reeln.models.plugin_input import InputField
 from reeln.models.team import TeamProfile
+from reeln.plugins.inputs import InputCollector
+
+
+def _collector_with_plugin_inputs() -> InputCollector:
+    """Return an InputCollector with thumbnail_image and tournament fields registered."""
+    collector = InputCollector()
+    collector._register_field(
+        InputField(
+            id="thumbnail_image", label="Thumbnail", field_type="file", command="game_init", plugin_name="google"
+        )
+    )
+    collector._register_field(
+        InputField(id="tournament", label="Tournament", field_type="str", command="game_init", plugin_name="google")
+    )
+    return collector
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -641,6 +658,7 @@ def test_collect_with_profiles(mock_questionary: MagicMock) -> None:
     away_prof = TeamProfile(team_name="Bears", short_name="BRS", level="bantam")
 
     with (
+        patch("reeln.plugins.inputs.get_input_collector", return_value=_collector_with_plugin_inputs()),
         patch("reeln.core.prompts.prompt_sport", return_value="hockey"),
         patch("reeln.core.prompts.prompt_level", return_value="bantam"),
         patch("reeln.core.prompts.prompt_team", side_effect=[home_prof, away_prof]),
@@ -773,6 +791,7 @@ def test_collect_all_interactive() -> None:
     away_prof = TeamProfile(team_name="Bears", short_name="BRS", level="bantam")
 
     with (
+        patch("reeln.plugins.inputs.get_input_collector", return_value=_collector_with_plugin_inputs()),
         patch("reeln.core.prompts.prompt_sport", return_value="hockey"),
         patch("reeln.core.prompts.prompt_level", return_value="bantam"),
         patch("reeln.core.prompts.prompt_team", side_effect=[home_prof, away_prof]),
@@ -798,3 +817,60 @@ def test_collect_all_interactive() -> None:
     assert result["tournament"] == "Stars Cup"
     assert result["home_profile"] is home_prof
     assert result["away_profile"] is away_prof
+
+
+def test_collect_no_plugin_inputs_skips_thumbnail_and_tournament() -> None:
+    """Without plugins declaring thumbnail_image/tournament, prompts are skipped."""
+    from reeln.plugins.inputs import reset_input_collector
+
+    # Empty collector — no plugin inputs registered
+    reset_input_collector()
+
+    home_prof = TeamProfile(team_name="Eagles", short_name="EGL", level="bantam")
+    away_prof = TeamProfile(team_name="Bears", short_name="BRS", level="bantam")
+
+    with (
+        patch("reeln.core.prompts.prompt_sport", return_value="hockey"),
+        patch("reeln.core.prompts.prompt_level", return_value="bantam"),
+        patch("reeln.core.prompts.prompt_team", side_effect=[home_prof, away_prof]),
+        patch("reeln.core.prompts.prompt_date", return_value="2026-03-15"),
+        patch("reeln.core.prompts.prompt_venue", return_value="OVAL"),
+        patch("reeln.core.prompts.prompt_game_time", return_value="7:00 PM"),
+        patch("reeln.core.prompts.prompt_period_length", return_value=15),
+        patch("reeln.core.prompts.prompt_description", return_value="Test desc"),
+        patch("reeln.core.prompts.prompt_thumbnail") as mock_thumb,
+        patch("reeln.core.prompts.prompt_tournament") as mock_tourney,
+    ):
+        result = collect_game_info_interactive()
+
+    # Neither prompt function should have been called
+    mock_thumb.assert_not_called()
+    mock_tourney.assert_not_called()
+    assert result["thumbnail"] == ""
+    assert result["tournament"] == ""
+
+
+def test_collect_thumbnail_preset_always_returned() -> None:
+    """Thumbnail preset is always included even without plugin inputs."""
+    from reeln.plugins.inputs import reset_input_collector
+
+    reset_input_collector()
+
+    with (
+        patch("reeln.core.prompts.prompt_sport", return_value="hockey"),
+        patch("reeln.core.prompts.prompt_date", return_value="2026-03-15"),
+        patch("reeln.core.prompts.prompt_venue", return_value=""),
+        patch("reeln.core.prompts.prompt_game_time", return_value=""),
+        patch("reeln.core.prompts.prompt_period_length", return_value=15),
+        patch("reeln.core.prompts.prompt_description", return_value=""),
+        patch("reeln.core.prompts.prompt_thumbnail", return_value="/preset/thumb.jpg") as mock_thumb,
+    ):
+        result = collect_game_info_interactive(
+            home="Eagles",
+            away="Bears",
+            thumbnail="/preset/thumb.jpg",
+        )
+
+    # preset was provided, so prompt_thumbnail is called with it and returns immediately
+    mock_thumb.assert_called_once_with(preset="/preset/thumb.jpg")
+    assert result["thumbnail"] == "/preset/thumb.jpg"

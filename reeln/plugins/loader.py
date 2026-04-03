@@ -11,7 +11,9 @@ from reeln.core.log import get_logger
 from reeln.models.config import PluginsConfig
 from reeln.models.doctor import DoctorCheck
 from reeln.models.plugin import PluginInfo
+from reeln.models.plugin_input import PluginInputSchema
 from reeln.plugins.hooks import Hook
+from reeln.plugins.inputs import reset_input_collector
 from reeln.plugins.registry import FilteredRegistry, HookRegistry, get_registry
 
 log: logging.Logger = get_logger(__name__)
@@ -47,6 +49,10 @@ def _detect_capabilities(plugin: object) -> list[str]:
     for cap_name, method_name in _CAPABILITY_CHECKS:
         if callable(getattr(plugin, method_name, None)):
             caps.append(cap_name)
+    if callable(getattr(plugin, "get_input_schema", None)) or isinstance(
+        getattr(plugin, "input_schema", None), PluginInputSchema
+    ):
+        caps.append("inputs")
     return caps
 
 
@@ -213,6 +219,27 @@ def _register_plugin_hooks(
             effective_registry.register(hook, handler)
 
 
+def _fetch_registry_input_contributions(
+    registry_url: str,
+) -> dict[str, dict[str, list[dict[str, object]]]]:
+    """Fetch the plugin registry and return a name → input_contributions mapping.
+
+    Returns an empty dict on any error.
+    """
+    try:
+        from reeln.core.plugin_registry import fetch_registry
+
+        entries = fetch_registry(registry_url)
+        return {
+            e.name: e.input_contributions
+            for e in entries
+            if e.input_contributions
+        }
+    except Exception:
+        log.debug("Could not fetch registry for input contributions", exc_info=True)
+        return {}
+
+
 def _fetch_registry_capabilities(registry_url: str) -> dict[str, list[str]]:
     """Fetch the plugin registry and return a name → capabilities mapping.
 
@@ -261,6 +288,18 @@ def activate_plugins(plugins_config: PluginsConfig) -> dict[str, object]:
     for name, plugin in loaded.items():
         allowed = _parse_allowed_hooks(caps.get(name, []))
         _register_plugin_hooks(name, plugin, registry, allowed_hooks=allowed)
+
+    # Register plugin input contributions (class-level first, registry fallback)
+    collector = reset_input_collector()
+    for name, plugin in loaded.items():
+        collector.register_plugin_inputs(plugin, name)
+
+    # Fallback: use registry input_contributions for plugins that didn't
+    # declare their own input_schema / get_input_schema()
+    registry_inputs = _fetch_registry_input_contributions(plugins_config.registry_url)
+    for name, contributions in registry_inputs.items():
+        if name in loaded:
+            collector.register_registry_inputs(name, contributions)
 
     return loaded
 

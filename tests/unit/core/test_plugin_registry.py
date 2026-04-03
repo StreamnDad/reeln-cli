@@ -964,3 +964,130 @@ def test_pip_result_defaults() -> None:
     assert r.action == ""
     assert r.output == ""
     assert r.error == ""
+
+
+# ---------------------------------------------------------------------------
+# uninstall_plugin
+# ---------------------------------------------------------------------------
+
+
+def test_uninstall_plugin_success() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "Uninstalled reeln-plugin-google"
+
+    with patch("reeln.core.plugin_registry.subprocess.run", return_value=mock_proc):
+        result = uninstall_plugin("google", entries)
+    assert result.success is True
+    assert result.action == "uninstall"
+
+
+def test_uninstall_plugin_failure() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    mock_proc = MagicMock()
+    mock_proc.returncode = 1
+    mock_proc.stderr = "permission denied"
+
+    with patch("reeln.core.plugin_registry.subprocess.run", return_value=mock_proc):
+        result = uninstall_plugin("google", entries)
+    assert result.success is False
+    assert "permission denied" in result.error
+
+
+def test_uninstall_plugin_dry_run() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    result = uninstall_plugin("google", entries, dry_run=True)
+    assert result.success is True
+    assert result.action == "dry-run"
+    assert "Would run" in result.output
+
+
+def test_uninstall_plugin_timeout() -> None:
+    import subprocess
+
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    with patch(
+        "reeln.core.plugin_registry.subprocess.run",
+        side_effect=subprocess.TimeoutExpired("cmd", 120),
+    ):
+        result = uninstall_plugin("google", entries)
+    assert result.success is False
+    assert "timed out" in result.error
+
+
+def test_uninstall_plugin_exception() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    with patch(
+        "reeln.core.plugin_registry.subprocess.run",
+        side_effect=RuntimeError("unexpected"),
+    ):
+        result = uninstall_plugin("google", entries)
+    assert result.success is False
+    assert "unexpected" in result.error
+
+
+def test_uninstall_plugin_not_in_registry() -> None:
+    from reeln.core.errors import RegistryError
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    with pytest.raises(RegistryError, match="not found"):
+        uninstall_plugin("nonexistent", [])
+
+
+def test_uninstall_plugin_with_installer_uv() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "ok"
+
+    with patch("reeln.core.plugin_registry.subprocess.run", return_value=mock_proc) as mock_run:
+        uninstall_plugin("google", entries, installer="uv")
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == "uv"
+    assert "uninstall" in cmd
+
+
+def test_uninstall_plugin_with_installer_pip() -> None:
+    from reeln.core.plugin_registry import uninstall_plugin
+
+    entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "ok"
+
+    with patch("reeln.core.plugin_registry.subprocess.run", return_value=mock_proc) as mock_run:
+        uninstall_plugin("google", entries, installer="pip")
+    cmd = mock_run.call_args[0][0]
+    assert "pip" in " ".join(cmd)
+    assert "-y" in cmd
+
+
+def test_detect_uninstaller_uv() -> None:
+    from reeln.core.plugin_registry import _detect_uninstaller
+
+    with patch("shutil.which", return_value="/usr/bin/uv"):
+        cmd = _detect_uninstaller()
+    assert cmd[0] == "uv"
+    assert "uninstall" in cmd
+
+
+def test_detect_uninstaller_pip() -> None:
+    from reeln.core.plugin_registry import _detect_uninstaller
+
+    with patch("shutil.which", return_value=None):
+        cmd = _detect_uninstaller()
+    assert "pip" in " ".join(cmd)
+    assert "-y" in cmd

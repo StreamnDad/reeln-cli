@@ -426,9 +426,7 @@ def test_build_filter_chain_pad_full(tmp_path: Path) -> None:
     sub = tmp_path / "subs.ass"
     cfg = _cfg(tmp_path, speed=0.5, lut=lut, subtitle=sub)
     chain, audio = build_filter_chain(cfg)
-    expected = (
-        f"lut3d={lut},setpts=PTS/0.5,scale=1080:-2:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,subtitles=f={sub}"
-    )
+    expected = f"lut3d={lut},setpts=PTS/0.5,scale=1080:-2:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,subtitles=f={sub}"
     assert chain == expected
     assert audio == "atempo=0.5"
 

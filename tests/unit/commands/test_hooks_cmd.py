@@ -32,8 +32,13 @@ def test_log_capture_info_goes_to_records() -> None:
     capture = _LogCapture()
     capture.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="", lineno=0,
-        msg="hello", args=(), exc_info=None,
+        name="test",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="hello",
+        args=(),
+        exc_info=None,
     )
     capture.emit(record)
     assert capture.records == ["hello"]
@@ -44,8 +49,13 @@ def test_log_capture_warning_goes_to_records() -> None:
     capture = _LogCapture()
     capture.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        name="test", level=logging.WARNING, pathname="", lineno=0,
-        msg="warn", args=(), exc_info=None,
+        name="test",
+        level=logging.WARNING,
+        pathname="",
+        lineno=0,
+        msg="warn",
+        args=(),
+        exc_info=None,
     )
     capture.emit(record)
     assert capture.records == ["warn"]
@@ -56,8 +66,13 @@ def test_log_capture_error_goes_to_errors() -> None:
     capture = _LogCapture()
     capture.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        name="test", level=logging.ERROR, pathname="", lineno=0,
-        msg="bad", args=(), exc_info=None,
+        name="test",
+        level=logging.ERROR,
+        pathname="",
+        lineno=0,
+        msg="bad",
+        args=(),
+        exc_info=None,
     )
     capture.emit(record)
     assert capture.records == []
@@ -68,8 +83,13 @@ def test_log_capture_critical_goes_to_errors() -> None:
     capture = _LogCapture()
     capture.setFormatter(logging.Formatter("%(message)s"))
     record = logging.LogRecord(
-        name="test", level=logging.CRITICAL, pathname="", lineno=0,
-        msg="fatal", args=(), exc_info=None,
+        name="test",
+        level=logging.CRITICAL,
+        pathname="",
+        lineno=0,
+        msg="fatal",
+        args=(),
+        exc_info=None,
     )
     capture.emit(record)
     assert capture.errors == ["fatal"]
@@ -329,11 +349,18 @@ def test_run_with_file_references(tmp_path: Path) -> None:
     shared_file.write_text('{"key": "val"}')
 
     with patch("reeln.commands.hooks_cmd.load_config", return_value=AppConfig()):
-        result = runner.invoke(app, [
-            "hooks", "run", "on_game_init",
-            "--context-json", f"@{ctx_file}",
-            "--shared-json", f"@{shared_file}",
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "hooks",
+                "run",
+                "on_game_init",
+                "--context-json",
+                f"@{ctx_file}",
+                "--shared-json",
+                f"@{shared_file}",
+            ],
+        )
 
     assert result.exit_code == 0
     output = json.loads(result.output.strip())
@@ -354,6 +381,7 @@ def test_run_plugin_writes_to_shared() -> None:
 
     def fake_activate(plugins_config: object) -> dict[str, object]:
         from reeln.plugins.registry import get_registry
+
         registry = get_registry()
         registry.register(Hook.ON_GAME_INIT, fake_handler)
         return {}
@@ -389,6 +417,7 @@ def test_run_plugin_logs_captured() -> None:
 
     def fake_activate(plugins_config: object) -> dict[str, object]:
         from reeln.plugins.registry import get_registry
+
         registry = get_registry()
         registry.register(Hook.ON_GAME_INIT, logging_handler)
         return {}
@@ -413,6 +442,7 @@ def test_run_plugin_error_logged_not_fatal() -> None:
 
     def fake_activate(plugins_config: object) -> dict[str, object]:
         from reeln.plugins.registry import get_registry
+
         registry = get_registry()
         registry.register(Hook.ON_GAME_INIT, bad_handler)
         return {}

@@ -100,8 +100,7 @@ def render_profile_to_dict(profile: RenderProfile) -> dict[str, Any]:
             result[field_name] = value
     if profile.speed_segments is not None:
         result["speed_segments"] = [
-            {"speed": s.speed, **({"until": s.until} if s.until is not None else {})}
-            for s in profile.speed_segments
+            {"speed": s.speed, **({"until": s.until} if s.until is not None else {})} for s in profile.speed_segments
         ]
     return result
 
@@ -169,13 +168,8 @@ def _opt_str(data: dict[str, Any], key: str) -> str | None:
     return str(v) if v is not None else None
 
 
-def _opt_speed_segments(
-    data: dict[str, Any], key: str
-) -> tuple[SpeedSegment, ...] | None:
+def _opt_speed_segments(data: dict[str, Any], key: str) -> tuple[SpeedSegment, ...] | None:
     v = data.get(key)
     if v is None or not isinstance(v, list):
         return None
-    return tuple(
-        SpeedSegment(speed=float(s["speed"]), until=s.get("until"))
-        for s in v
-    )
+    return tuple(SpeedSegment(speed=float(s["speed"]), until=s.get("until")) for s in v)

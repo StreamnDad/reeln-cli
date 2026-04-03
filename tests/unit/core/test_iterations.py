@@ -889,7 +889,10 @@ def test_speed_segments_overlay_duration_adjusted(tmp_path: Path) -> None:
     config = _make_config(slowmo=slowmo_profile)
 
     short_cfg = ShortConfig(
-        input=clip, output=output, width=1080, height=1920,
+        input=clip,
+        output=output,
+        width=1080,
+        height=1920,
     )
 
     iter0 = _iteration_temp(output, 0)
@@ -914,8 +917,13 @@ def test_speed_segments_overlay_duration_adjusted(tmp_path: Path) -> None:
         MockRenderer.return_value = mock_instance
 
         render_iterations(
-            clip, ["slowmo"], config, Path("/usr/bin/ffmpeg"), output,
-            is_short=True, short_config=short_cfg,
+            clip,
+            ["slowmo"],
+            config,
+            Path("/usr/bin/ffmpeg"),
+            output,
+            is_short=True,
+            short_config=short_cfg,
             event_metadata={"assists": "A, B"},
         )
 
@@ -1069,7 +1077,10 @@ def test_multiple_profiles_xfade_fallback_to_concat(tmp_path: Path) -> None:
 @patch(f"{_MOD}.FFmpegRenderer")
 @patch(f"{_MOD}.plan_short")
 def test_render_iterations_branding_first_only(
-    mock_plan: MagicMock, MockRenderer: MagicMock, mock_run: MagicMock, tmp_path: Path,
+    mock_plan: MagicMock,
+    MockRenderer: MagicMock,
+    mock_run: MagicMock,
+    tmp_path: Path,
 ) -> None:
     """Branding should only appear on the first iteration."""
     config = _make_config()
@@ -1093,9 +1104,7 @@ def test_render_iterations_branding_first_only(
         branding=branding_file,
     )
 
-    mock_plan.return_value = RenderPlan(
-        inputs=[clip], output=output, filter_complex="scale=1080:-2"
-    )
+    mock_plan.return_value = RenderPlan(inputs=[clip], output=output, filter_complex="scale=1080:-2")
     mock_instance = MagicMock()
     mock_instance.render.side_effect = lambda plan, **kw: (
         plan.output.touch(),
@@ -1126,7 +1135,8 @@ def test_render_iterations_branding_first_only(
 
 
 def test_game_info_included_in_post_render_hook(
-    tmp_path: Path, _mock_hook_registry: MagicMock,
+    tmp_path: Path,
+    _mock_hook_registry: MagicMock,
 ) -> None:
     """When game_info is provided, it appears in POST_RENDER hook data."""
     clip = tmp_path / "clip.mkv"
@@ -1167,7 +1177,8 @@ def test_game_info_included_in_post_render_hook(
 
 
 def test_game_info_omitted_when_none(
-    tmp_path: Path, _mock_hook_registry: MagicMock,
+    tmp_path: Path,
+    _mock_hook_registry: MagicMock,
 ) -> None:
     """When game_info is None, it is not included in POST_RENDER data."""
     clip = tmp_path / "clip.mkv"
@@ -1204,7 +1215,8 @@ def test_game_info_omitted_when_none(
 
 
 def test_event_context_included_in_post_render_hook(
-    tmp_path: Path, _mock_hook_registry: MagicMock,
+    tmp_path: Path,
+    _mock_hook_registry: MagicMock,
 ) -> None:
     """When game_event/player/assists are provided, they appear in POST_RENDER data."""
     clip = tmp_path / "clip.mkv"
