@@ -861,7 +861,12 @@ def test_plugins_uninstall_confirmed() -> None:
 
 def test_plugins_uninstall_dry_run() -> None:
     entries = [RegistryEntry(name="google", package="reeln-plugin-google")]
-    pip_result = PipResult(success=True, package="reeln-plugin-google", action="dry-run", output="Would run: uv pip uninstall reeln-plugin-google")
+    pip_result = PipResult(
+        success=True,
+        package="reeln-plugin-google",
+        action="dry-run",
+        output="Would run: uv pip uninstall reeln-plugin-google",
+    )
     with (
         patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
         patch("reeln.commands.plugins_cmd.fetch_registry", return_value=entries),

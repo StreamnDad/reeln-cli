@@ -2139,7 +2139,6 @@ def test_game_compile_debug_dry_run_skipped(tmp_path: Path) -> None:
 
 def test_game_init_thumbnail_bridges_to_plugin_input(tmp_path: Path) -> None:
     """--thumbnail value is bridged to plugin_inputs as thumbnail_image."""
-    from unittest.mock import ANY
 
     captured_kwargs: dict[str, object] = {}
 
@@ -2198,12 +2197,28 @@ def test_game_list_shows_games(tmp_path: Path) -> None:
     g1 = tmp_path / "2026-03-15_a_vs_b"
     g1.mkdir()
     (g1 / "game.json").write_text(
-        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+            },
+            "finished": True,
+        })
     )
     g2 = tmp_path / "2026-03-20_c_vs_d"
     g2.mkdir()
     (g2 / "game.json").write_text(
-        _json.dumps({"game_info": {"home_team": "Ducks", "away_team": "Hawks", "sport": "hockey", "date": "2026-03-20"}, "finished": False})
+        _json.dumps({
+            "game_info": {
+                "home_team": "Ducks",
+                "away_team": "Hawks",
+                "sport": "hockey",
+                "date": "2026-03-20",
+            },
+            "finished": False,
+        })
     )
 
     result = runner.invoke(app, ["game", "list", "-o", str(tmp_path)])
@@ -2303,7 +2318,14 @@ def test_game_info_finished_with_tournament(tmp_path: Path) -> None:
             "finished": True,
             "segments_processed": [],
             "events": [],
-            "renders": [{"input": "a.mkv", "output": "a_short.mp4", "segment_number": 1, "format": "vertical", "crop_mode": "pad", "rendered_at": "2026-03-15T19:00:00"}],
+            "renders": [{
+                "input": "a.mkv",
+                "output": "a_short.mp4",
+                "segment_number": 1,
+                "format": "vertical",
+                "crop_mode": "pad",
+                "rendered_at": "2026-03-15T19:00:00",
+            }],
             "livestreams": {},
             "created_at": "2026-03-15T18:00:00",
             "finished_at": "2026-03-15T20:00:00",
@@ -2359,7 +2381,15 @@ def test_game_delete_with_force(tmp_path: Path) -> None:
     game_dir = tmp_path / "2026-03-15_a_vs_b"
     game_dir.mkdir()
     (game_dir / "game.json").write_text(
-        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+            },
+            "finished": True,
+        })
     )
 
     result = runner.invoke(app, ["game", "delete", "-o", str(game_dir), "--force"])
@@ -2374,7 +2404,15 @@ def test_game_delete_cancelled(tmp_path: Path) -> None:
     game_dir = tmp_path / "2026-03-15_a_vs_b"
     game_dir.mkdir()
     (game_dir / "game.json").write_text(
-        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+            },
+            "finished": True,
+        })
     )
 
     result = runner.invoke(app, ["game", "delete", "-o", str(game_dir)], input="n\n")
@@ -2389,7 +2427,15 @@ def test_game_delete_confirmed(tmp_path: Path) -> None:
     game_dir = tmp_path / "2026-03-15_a_vs_b"
     game_dir.mkdir()
     (game_dir / "game.json").write_text(
-        _json.dumps({"game_info": {"home_team": "Eagles", "away_team": "Bears", "sport": "hockey", "date": "2026-03-15"}, "finished": True})
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+            },
+            "finished": True,
+        })
     )
 
     result = runner.invoke(app, ["game", "delete", "-o", str(game_dir)], input="y\n")

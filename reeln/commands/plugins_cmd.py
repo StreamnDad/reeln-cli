@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from reeln.commands.style import bold, error, label, success, warn
 from reeln.core.config import load_config, save_config
 from reeln.core.errors import RegistryError
 from reeln.core.plugin_registry import (
@@ -19,8 +20,6 @@ from reeln.models.plugin import PluginStatus
 from reeln.plugins.loader import (
     discover_plugins,
 )
-
-from reeln.commands.style import bold, error, label, success, warn
 
 app = typer.Typer(no_args_is_help=True, help="Plugin management commands.")
 

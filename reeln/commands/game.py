@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from reeln.commands import event
-from reeln.commands.style import bold, error, label, success, warn
+from reeln.commands.style import bold, label, success, warn
 from reeln.core.config import load_config
 from reeln.core.errors import PromptAborted, ReelnError
 from reeln.core.ffmpeg import discover_ffmpeg
