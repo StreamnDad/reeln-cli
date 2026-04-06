@@ -55,6 +55,16 @@
       "license": "AGPL-3.0"
     },
     {
+      "name": "tiktok",
+      "package": "reeln-plugin-tiktok",
+      "description": "TikTok integration — video uploads via Content Posting API v2 with FILE_UPLOAD and PULL_FROM_URL support",
+      "capabilities": ["hook:ON_GAME_INIT", "hook:POST_RENDER", "hook:ON_GAME_FINISH"],
+      "homepage": "https://github.com/StreamnDad/reeln-plugin-tiktok",
+      "min_reeln_version": "0.0.31",
+      "author": "StreamnDad",
+      "license": "AGPL-3.0"
+    },
+    {
       "name": "openai",
       "package": "reeln-plugin-openai",
       "version": "0.8.2",
