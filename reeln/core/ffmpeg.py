@@ -547,6 +547,7 @@ def build_short_command(ffmpeg_path: Path, plan: RenderPlan) -> list[str]:
     """Build an ffmpeg command for short-form rendering with filter chains.
 
     Uses ``-filter_complex`` for the video filter chain and ``-af`` for audio.
+    Supports multiple inputs (e.g. a logo image as the second input).
     """
     cmd = [
         str(ffmpeg_path),
@@ -556,12 +557,20 @@ def build_short_command(ffmpeg_path: Path, plan: RenderPlan) -> list[str]:
         "-i",
         str(plan.inputs[0]),
     ]
+    # Additional inputs (e.g. logo image).  Static images need -loop 1
+    # so they persist for the full duration of the overlay.
+    for extra_input in plan.inputs[1:]:
+        cmd.extend(["-loop", "1", "-i", str(extra_input)])
     if plan.filter_complex:
         cmd.extend(["-filter_complex", plan.filter_complex])
         # When audio is embedded in filter_complex (speed_segments), add
         # explicit stream mapping so ffmpeg picks the correct output pads.
         if "[vfinal]" in plan.filter_complex and "[afinal]" in plan.filter_complex:
             cmd.extend(["-map", "[vfinal]", "-map", "[afinal]"])
+        elif len(plan.inputs) > 1 and "[afinal]" not in (plan.filter_complex or ""):
+            # Logo image has no audio — map audio explicitly from video input
+            # to prevent ffmpeg from trying to auto-select from the image.
+            cmd.extend(["-map", "0:a?"])
     if plan.audio_filter:
         cmd.extend(["-af", plan.audio_filter])
     cmd.extend(

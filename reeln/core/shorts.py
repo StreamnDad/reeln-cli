@@ -287,6 +287,100 @@ def build_speed_segments_filters(
 
 
 # ---------------------------------------------------------------------------
+# Logo overlay
+# ---------------------------------------------------------------------------
+
+# ASS overlay box constants (PlayRes 1920x1080)
+_ASS_RES_X = 1920
+_ASS_RES_Y = 1080
+_BOX_X = 3
+_BOX_Y = 820
+_BOX_W = 1914
+_BOX_H_ASSISTS = 142
+_BOX_H_NO_ASSISTS = 135
+_LOGO_MARGIN = 10  # margin from box edges in ASS units
+
+
+def build_logo_overlay_filter(
+    *,
+    target_width: int,
+    target_height: int,
+    y_offset: int = 0,
+    has_assists: bool = True,
+) -> tuple[str, str]:
+    """Build ffmpeg scale and overlay filters for a team logo.
+
+    The logo is positioned on the right side of the overlay box, vertically
+    centred.  Coordinates are computed by mapping the ASS 1920x1080 box
+    layout into the actual output pixel space.
+
+    Returns ``(logo_scale_filter, logo_overlay_filter)``.
+    """
+    x_scale = target_width / _ASS_RES_X
+    y_scale = target_height / _ASS_RES_Y
+    box_h_ass = _BOX_H_ASSISTS if has_assists else _BOX_H_NO_ASSISTS
+    box_y_out = (_BOX_Y + y_offset) * y_scale
+    box_w_out = _BOX_W * x_scale
+    box_h_out = box_h_ass * y_scale
+    box_x_out = _BOX_X * x_scale
+
+    # Scale logo to 80 % of box height, preserving aspect ratio.
+    logo_max_h = int(box_h_out * 0.8)
+    logo_max_h += logo_max_h % 2  # ensure even for ffmpeg
+
+    scale_filter = f"scale=-1:{logo_max_h}:flags=lanczos"
+
+    margin_out = int(_LOGO_MARGIN * x_scale)
+    # overlay expressions: ``w`` = overlay (logo) width, ``h`` = overlay height
+    logo_x = int(box_x_out + box_w_out) - margin_out
+    logo_cy = int(box_y_out + box_h_out / 2)
+    overlay_filter = f"overlay=x={logo_x}-w:y={logo_cy}-h/2:format=auto:shortest=1"
+
+    return scale_filter, overlay_filter
+
+
+def _wrap_filter_with_logo(
+    filter_complex: str,
+    logo_scale: str,
+    logo_overlay: str,
+) -> str:
+    """Append logo overlay to an existing filter_complex string.
+
+    Handles three graph shapes:
+
+    1. **Stream-label graph with** ``[vfinal]``:  rename ``[vfinal]`` →
+       ``[_prelogo]`` (last occurrence only), overlay produces ``[vfinal]``.
+    2. **Multi-stream graph** (contains ``[0:v]`` and ``;``): label the
+       final output ``[_prelogo]``, append overlay.
+    3. **Simple comma-joined chain**: wrap with ``[0:v]`` prefix and labels.
+    """
+    logo_part = f"[1:v]{logo_scale}[_logo]"
+
+    if "[vfinal]" in filter_complex:
+        idx = filter_complex.rfind("[vfinal]")
+        before = filter_complex[:idx]
+        after = filter_complex[idx + len("[vfinal]"):]
+        return (
+            f"{before}[_prelogo]{after};"
+            f"{logo_part};"
+            f"[_prelogo][_logo]{logo_overlay}[vfinal]"
+        )
+    if "[0:v]" in filter_complex and ";" in filter_complex:
+        # Multi-stream graph (e.g. smart pad): label the tail, then overlay.
+        return (
+            f"{filter_complex}[_prelogo];"
+            f"{logo_part};"
+            f"[_prelogo][_logo]{logo_overlay}"
+        )
+    # Simple comma-joined chain
+    return (
+        f"[0:v]{filter_complex}[_prelogo];"
+        f"{logo_part};"
+        f"[_prelogo][_logo]{logo_overlay}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Filter chain assembly
 # ---------------------------------------------------------------------------
 
@@ -399,6 +493,12 @@ def build_filter_chain(
             post_filters=post_filters or None,
             source_fps=source_fps,
         )
+        if config.logo is not None:
+            logo_scale, logo_overlay = build_logo_overlay_filter(
+                target_width=config.width,
+                target_height=config.height,
+            )
+            filter_complex = _wrap_filter_with_logo(filter_complex, logo_scale, logo_overlay)
         return filter_complex, audio_filter
 
     if effective_crop == CropMode.PAD:
@@ -434,6 +534,14 @@ def build_filter_chain(
         filters.append(build_subtitle_filter(config.branding))
 
     filter_complex = ",".join(filters)
+
+    # 9. Logo overlay (after subtitle/branding, as a second input)
+    if config.logo is not None:
+        logo_scale, logo_overlay = build_logo_overlay_filter(
+            target_width=config.width,
+            target_height=config.height,
+        )
+        filter_complex = _wrap_filter_with_logo(filter_complex, logo_scale, logo_overlay)
 
     # Audio filter
     audio_filter = None
@@ -564,7 +672,14 @@ def _build_speed_segments_chain(
         audio_graph = audio_segs.replace("[_asrc]", "[0:a]", 1)
         audio_graph = audio_graph.replace("[_aout]", "[afinal]")
 
-        return f"{video_graph};{audio_graph}", None
+        fc = f"{video_graph};{audio_graph}"
+        if config.logo is not None:
+            logo_scale, logo_overlay = build_logo_overlay_filter(
+                target_width=config.width,
+                target_height=config.height,
+            )
+            fc = _wrap_filter_with_logo(fc, logo_scale, logo_overlay)
+        return fc, None
 
     # Crop or pad (static)
     if effective_crop == CropMode.PAD:
@@ -617,6 +732,12 @@ def _build_speed_segments_chain(
     audio_graph = audio_graph.replace("[_aout]", "[afinal]")
 
     filter_complex = f"{video_graph};{audio_graph}"
+    if config.logo is not None:
+        logo_scale, logo_overlay = build_logo_overlay_filter(
+            target_width=config.width,
+            target_height=config.height,
+        )
+        filter_complex = _wrap_filter_with_logo(filter_complex, logo_scale, logo_overlay)
     return filter_complex, None
 
 
@@ -634,8 +755,11 @@ def plan_short(
     """Create a RenderPlan for a short-form render."""
     validate_short_config(config)
     filter_complex, audio_filter = build_filter_chain(config, zoom_path=zoom_path, source_fps=source_fps)
+    inputs: list[Path] = [config.input]
+    if config.logo is not None:
+        inputs.append(config.logo)
     return RenderPlan(
-        inputs=[config.input],
+        inputs=inputs,
         output=config.output,
         codec=config.codec,
         preset=config.preset,
@@ -681,10 +805,14 @@ def plan_preview(config: ShortConfig) -> RenderPlan:
         audio_codec=config.audio_codec,
         audio_bitrate=config.audio_bitrate,
         branding=config.branding,
+        logo=config.logo,
     )
     filter_complex, audio_filter = build_filter_chain(preview)
+    inputs: list[Path] = [preview.input]
+    if preview.logo is not None:
+        inputs.append(preview.logo)
     return RenderPlan(
-        inputs=[preview.input],
+        inputs=inputs,
         output=preview.output,
         codec=preview.codec,
         preset=preview.preset,

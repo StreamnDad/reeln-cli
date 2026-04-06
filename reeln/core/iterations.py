@@ -132,6 +132,7 @@ def render_iterations(
                     base_ctx,
                     duration=iter_dur,
                     event_metadata=event_metadata,
+                    has_logo=short_config is not None and short_config.logo is not None,
                 )
 
             # Resolve subtitle template

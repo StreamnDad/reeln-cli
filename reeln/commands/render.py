@@ -172,12 +172,13 @@ def _resolve_player_numbers(
     game_dir: Path | None,
     config_output_dir: Path | None,
     clip: Path | None,
-) -> tuple[str, str | None, str | None]:
-    """Resolve --player-numbers to (scorer_display, assists_csv, scoring_team_name).
+) -> tuple[str, str | None, str | None, Path | None]:
+    """Resolve --player-numbers to (scorer_display, assists_csv, scoring_team_name, logo_path).
 
     Loads game state, determines scoring team, loads roster, and looks up numbers.
     Returns the scorer display string, a comma-separated assists string (or None),
-    and the scoring team name (or None).
+    the scoring team name (or None), and the team logo path (or None if not set
+    or file does not exist).
     """
     from reeln.core.highlights import load_game_state
     from reeln.core.teams import load_roster, load_team_profile, lookup_players, resolve_scoring_team
@@ -232,7 +233,15 @@ def _resolve_player_numbers(
     scorer, assist_list = lookup_players(roster, numbers, team_name)
 
     assists_csv = ", ".join(assist_list) if assist_list else None
-    return (scorer, assists_csv, team_name)
+
+    # 6. Resolve logo path
+    logo: Path | None = None
+    if team_profile.logo_path:
+        candidate = Path(team_profile.logo_path)
+        if candidate.is_file():
+            logo = candidate
+
+    return (scorer, assists_csv, team_name, logo)
 
 
 def _do_short(
@@ -288,8 +297,9 @@ def _do_short(
 
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
+    _logo_path: Path | None = None
     if player_numbers is not None:
-        scorer, assists_from_roster, _scoring_team_name = _resolve_player_numbers(
+        scorer, assists_from_roster, _scoring_team_name, _logo_path = _resolve_player_numbers(
             player_numbers, event_type, game_dir, config.paths.output_dir, clip
         )
         # Explicit --player/--assists take precedence over roster lookup
@@ -370,6 +380,7 @@ def _do_short(
         audio_codec=config.video.audio_codec,
         audio_bitrate=config.video.audio_bitrate,
         smart_zoom_frames=resolved_zoom_frames,
+        logo=_logo_path,
     )
 
     # Apply render profile overlay if specified
@@ -419,6 +430,7 @@ def _do_short(
                     duration=dur,
                     event_metadata=event_meta,
                     scoring_team=_scoring_team_name,
+                    has_logo=_logo_path is not None,
                 )
 
             subtitle_dir = (output or _default_output(clip, "_short")).parent
@@ -461,6 +473,7 @@ def _do_short(
             speed_segments=short_config.speed_segments,
             smart_zoom_frames=short_config.smart_zoom_frames,
             branding=branding_subtitle,
+            logo=short_config.logo,
         )
 
     # Smart zoom: extract frames before iterate or single render
@@ -544,6 +557,7 @@ def _do_short(
                     audio_codec=short_config.audio_codec,
                     audio_bitrate=short_config.audio_bitrate,
                     smart_zoom_frames=short_config.smart_zoom_frames,
+                    logo=short_config.logo,
                 )
 
         source_fps = extracted_frames.fps if extracted_frames is not None else 30.0
@@ -1050,7 +1064,7 @@ def apply_profile(
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
     if player_numbers_str is not None:
-        scorer, assists_from_roster, _scoring_team_name = _resolve_player_numbers(
+        scorer, assists_from_roster, _scoring_team_name, _ = _resolve_player_numbers(
             player_numbers_str, event_type, game_dir, config.paths.output_dir, clip
         )
         if player_name is None:

@@ -77,3 +77,4 @@ class ShortConfig:
     speed_segments: tuple[SpeedSegment, ...] | None = None
     smart_zoom_frames: int = 5
     branding: Path | None = None
+    logo: Path | None = None

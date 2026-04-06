@@ -84,6 +84,7 @@ def build_overlay_context(
     away_colors: list[str] | None = None,
     y_offset: int = 0,
     scoring_team: str | None = None,
+    has_logo: bool = False,
 ) -> TemplateContext:
     """Enrich a template context with overlay-specific variables.
 
@@ -109,11 +110,18 @@ def build_overlay_context(
     assist_end = format_ass_time(end_time if has_assists else 0.0)
     box_end = format_ass_time(end_time)
 
-    # Font sizing
+    # Font sizing — reduce max_chars when a logo is present so text
+    # stays within the clipped region and doesn't run under the logo.
+    scorer_max_chars = 18 if has_logo else 24
+    assist_max_chars = 22 if has_logo else 30
     scorer_base = 46 if has_assists else 54
     scorer_min = 32 if has_assists else 38
-    goal_scorer_fs = str(overlay_font_size(scorer_text, base=scorer_base, min_size=scorer_min, max_chars=24))
-    goal_assist_fs = str(overlay_font_size(f"{assist_1} {assist_2}".strip(), base=20, min_size=16, max_chars=30))
+    goal_scorer_fs = str(overlay_font_size(
+        scorer_text, base=scorer_base, min_size=scorer_min, max_chars=scorer_max_chars,
+    ))
+    goal_assist_fs = str(overlay_font_size(
+        f"{assist_1} {assist_2}".strip(), base=20, min_size=16, max_chars=assist_max_chars,
+    ))
 
     # Colors
     primary_rgb = _DEFAULT_PRIMARY
@@ -151,6 +159,12 @@ def build_overlay_context(
         goal_scorer_team = team_name
         team_level = level
 
+    # Logo reserve — when a logo is present, clip text rendering to the
+    # left portion of the box so it doesn't overlap the logo image.
+    # 200 ASS-units reserved for logo + padding on the right side.
+    _LOGO_RESERVE = 200
+    text_right = str(3 + 1914 - _LOGO_RESERVE) if has_logo else "1920"
+
     # Layout coordinates (ported from old CLI)
     variables: dict[str, str] = {
         "box_end": box_end,
@@ -171,6 +185,7 @@ def build_overlay_context(
         "ass_name_color": ass_name_color,
         "ass_team_text_color": ass_team_text_color,
         "ass_name_outline_color": ass_name_outline_color,
+        "goal_overlay_text_right": text_right,
         "goal_overlay_border_x": "0",
         "goal_overlay_border_y": str(817 + y_offset),
         "goal_overlay_border_w": "1920",

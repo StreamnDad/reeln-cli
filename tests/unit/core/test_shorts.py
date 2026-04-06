@@ -1259,3 +1259,170 @@ def test_plan_preview_passes_branding(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, branding=brand)
     plan = plan_preview(cfg)
     assert "subtitles=" in plan.filter_complex
+
+
+# ---------------------------------------------------------------------------
+# Logo overlay
+# ---------------------------------------------------------------------------
+
+
+def test_build_logo_overlay_filter_defaults() -> None:
+    from reeln.core.shorts import build_logo_overlay_filter
+
+    scale_f, overlay_f = build_logo_overlay_filter(
+        target_width=1080, target_height=1920,
+    )
+    assert "scale=" in scale_f
+    assert "lanczos" in scale_f
+    assert "overlay=" in overlay_f
+    assert "shortest=1" in overlay_f
+
+
+def test_build_logo_overlay_filter_square() -> None:
+    from reeln.core.shorts import build_logo_overlay_filter
+
+    scale_f, overlay_f = build_logo_overlay_filter(
+        target_width=1080, target_height=1080,
+    )
+    assert "scale=" in scale_f
+    assert "overlay=" in overlay_f
+
+
+def test_build_logo_overlay_filter_no_assists() -> None:
+    from reeln.core.shorts import build_logo_overlay_filter
+
+    scale_f, _ = build_logo_overlay_filter(
+        target_width=1080, target_height=1920, has_assists=False,
+    )
+    # Different box height should produce a different max logo height
+    scale_assists, _ = build_logo_overlay_filter(
+        target_width=1080, target_height=1920, has_assists=True,
+    )
+    # No-assists box is smaller -> logo height differs
+    assert scale_f != scale_assists
+
+
+def test_build_filter_chain_logo_pad(tmp_path: Path) -> None:
+    """Path 1 (simple pad): logo wraps chain with [1:v] overlay."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    cfg = _cfg(tmp_path, logo=logo)
+    chain, _ = build_filter_chain(cfg)
+    assert "[0:v]" in chain
+    assert "[1:v]" in chain
+    assert "overlay=" in chain
+    assert "[_prelogo]" in chain
+    assert "[_logo]" in chain
+
+
+def test_build_filter_chain_logo_crop(tmp_path: Path) -> None:
+    """Path 1 (simple crop): logo wraps chain with [1:v] overlay."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    cfg = _cfg(tmp_path, crop_mode=CropMode.CROP, logo=logo)
+    chain, _ = build_filter_chain(cfg)
+    assert "[1:v]" in chain
+    assert "overlay=" in chain
+
+
+def test_build_filter_chain_logo_with_subtitle(tmp_path: Path) -> None:
+    """Logo overlay appears after subtitle in filter chain."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    sub = tmp_path / "subs.ass"
+    sub.write_text("[Script Info]\n")
+    cfg = _cfg(tmp_path, subtitle=sub, logo=logo)
+    chain, _ = build_filter_chain(cfg)
+    assert "subtitles=" in chain
+    assert "overlay=" in chain
+    # Subtitle should come before overlay
+    sub_pos = chain.index("subtitles=")
+    overlay_pos = chain.index("overlay=")
+    assert sub_pos < overlay_pos
+
+
+def test_build_filter_chain_no_logo_unchanged(tmp_path: Path) -> None:
+    """No logo: chain is plain comma-joined (no [0:v] prefix)."""
+    cfg = _cfg(tmp_path)
+    chain, _ = build_filter_chain(cfg)
+    assert "[1:v]" not in chain
+    assert "[0:v]" not in chain
+
+
+def test_build_filter_chain_smart_pad_with_logo(tmp_path: Path) -> None:
+    """Path 2 (smart pad): logo appended to multi-stream graph."""
+    from reeln.models.zoom import ZoomPath, ZoomPoint
+
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    zp = ZoomPath(
+        duration=10.0,
+        points=(ZoomPoint(timestamp=0.0, center_x=0.5, center_y=0.5),),
+        source_width=1920,
+        source_height=1080,
+    )
+    cfg = _cfg(tmp_path, smart=True, logo=logo)
+    chain, _ = build_filter_chain(cfg, zoom_path=zp)
+    assert "[1:v]" in chain
+    assert "overlay=" in chain
+    assert "[_prelogo]" in chain
+
+
+def test_build_filter_chain_speed_segments_with_logo(tmp_path: Path) -> None:
+    """Path 3 (speed segments static): logo replaces [vfinal] with overlay."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+    cfg = _cfg(tmp_path, speed_segments=segs, logo=logo)
+    chain, audio = build_filter_chain(cfg)
+    assert audio is None
+    assert "[1:v]" in chain
+    assert "[vfinal]" in chain
+    assert "[_prelogo]" in chain
+
+
+def test_build_filter_chain_speed_segments_smart_pad_with_logo(tmp_path: Path) -> None:
+    """Path 4 (speed segments + smart pad): logo overlay after smart pad."""
+    from reeln.models.zoom import ZoomPath, ZoomPoint
+
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    zp = ZoomPath(
+        duration=10.0,
+        points=(ZoomPoint(timestamp=0.0, center_x=0.5, center_y=0.5),),
+        source_width=1920,
+        source_height=1080,
+    )
+    segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
+    cfg = _cfg(tmp_path, speed_segments=segs, smart=True, logo=logo)
+    chain, audio = build_filter_chain(cfg, zoom_path=zp, source_fps=30.0)
+    assert audio is None
+    assert "[1:v]" in chain
+    assert "[vfinal]" in chain
+
+
+def test_plan_short_with_logo(tmp_path: Path) -> None:
+    """plan_short includes logo in inputs list."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    cfg = _cfg(tmp_path, logo=logo)
+    plan = plan_short(cfg)
+    assert len(plan.inputs) == 2
+    assert plan.inputs[1] == logo
+
+
+def test_plan_short_no_logo(tmp_path: Path) -> None:
+    """plan_short has single input when no logo."""
+    cfg = _cfg(tmp_path)
+    plan = plan_short(cfg)
+    assert len(plan.inputs) == 1
+
+
+def test_plan_preview_with_logo(tmp_path: Path) -> None:
+    """plan_preview includes logo in inputs list."""
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(b"PNG")
+    cfg = _cfg(tmp_path, logo=logo)
+    plan = plan_preview(cfg)
+    assert len(plan.inputs) == 2
+    assert plan.inputs[1] == logo
