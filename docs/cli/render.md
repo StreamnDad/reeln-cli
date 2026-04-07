@@ -298,3 +298,32 @@ Merge raw replays first (existing `game segment`), then render the merged landsc
 reeln game segment 1
 reeln render short period-1/period-1_2026-02-26.mkv
 ```
+
+### Workflow C: Queue, review, and publish
+
+Render clips and queue them for selective publishing across platforms:
+
+```bash
+# Render and queue instead of publishing immediately
+reeln render short clip.mkv --queue
+reeln render apply clip.mkv -r slowmo --queue
+
+# Review queued items
+reeln queue list
+reeln queue show <ID>
+
+# Edit metadata before publishing
+reeln queue edit <ID> --title "Custom Title" --description "Updated description"
+
+# Publish to specific targets
+reeln queue publish <ID> --target youtube
+reeln queue publish <ID> --target instagram
+
+# Or publish all pending items
+reeln queue publish-all
+```
+
+The `--queue` flag is supported on both `render short` and `render apply`. When used,
+the render completes but output is queued for review instead of triggering `POST_RENDER`
+plugin hooks. The `ON_QUEUE` hook fires instead, allowing plugins to prepare metadata
+without uploading. Each queue item tracks per-target publish status independently.

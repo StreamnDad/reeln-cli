@@ -185,6 +185,17 @@ def test_short_config_branding_custom(tmp_path: Path) -> None:
     assert cfg.branding == brand
 
 
+def test_short_config_logo_default_none(tmp_path: Path) -> None:
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4")
+    assert cfg.logo is None
+
+
+def test_short_config_logo_custom(tmp_path: Path) -> None:
+    logo = tmp_path / "logo.png"
+    cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4", logo=logo)
+    assert cfg.logo == logo
+
+
 def test_short_config_is_frozen(tmp_path: Path) -> None:
     cfg = ShortConfig(input=tmp_path / "clip.mkv", output=tmp_path / "out.mp4")
     with pytest.raises(AttributeError):

@@ -42,6 +42,10 @@ class MediaError(ReelnError):
     """Media file operation error."""
 
 
+class QueueError(ReelnError):
+    """Queue operation error."""
+
+
 class PromptAborted(ReelnError):
     """User cancelled an interactive prompt."""
 

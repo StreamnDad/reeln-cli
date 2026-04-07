@@ -172,12 +172,13 @@ def _resolve_player_numbers(
     game_dir: Path | None,
     config_output_dir: Path | None,
     clip: Path | None,
-) -> tuple[str, str | None, str | None]:
-    """Resolve --player-numbers to (scorer_display, assists_csv, scoring_team_name).
+) -> tuple[str, str | None, str | None, Path | None]:
+    """Resolve --player-numbers to (scorer_display, assists_csv, scoring_team_name, logo_path).
 
     Loads game state, determines scoring team, loads roster, and looks up numbers.
     Returns the scorer display string, a comma-separated assists string (or None),
-    and the scoring team name (or None).
+    the scoring team name (or None), and the team logo path (or None if not set
+    or file does not exist).
     """
     from reeln.core.highlights import load_game_state
     from reeln.core.teams import load_roster, load_team_profile, lookup_players, resolve_scoring_team
@@ -232,7 +233,15 @@ def _resolve_player_numbers(
     scorer, assist_list = lookup_players(roster, numbers, team_name)
 
     assists_csv = ", ".join(assist_list) if assist_list else None
-    return (scorer, assists_csv, team_name)
+
+    # 6. Resolve logo path
+    logo: Path | None = None
+    if team_profile.logo_path:
+        candidate = Path(team_profile.logo_path)
+        if candidate.is_file():
+            logo = candidate
+
+    return (scorer, assists_csv, team_name, logo)
 
 
 def _do_short(
@@ -265,6 +274,7 @@ def _do_short(
     event_type: str | None = None,
     no_branding: bool = False,
     plugin_input: list[str] | None = None,
+    queue: bool = False,
 ) -> None:
     """Shared implementation for short and preview commands."""
     from reeln.core.ffmpeg import discover_ffmpeg
@@ -288,8 +298,9 @@ def _do_short(
 
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
+    _logo_path: Path | None = None
     if player_numbers is not None:
-        scorer, assists_from_roster, _scoring_team_name = _resolve_player_numbers(
+        scorer, assists_from_roster, _scoring_team_name, _logo_path = _resolve_player_numbers(
             player_numbers, event_type, game_dir, config.paths.output_dir, clip
         )
         # Explicit --player/--assists take precedence over roster lookup
@@ -370,6 +381,7 @@ def _do_short(
         audio_codec=config.video.audio_codec,
         audio_bitrate=config.video.audio_bitrate,
         smart_zoom_frames=resolved_zoom_frames,
+        logo=_logo_path,
     )
 
     # Apply render profile overlay if specified
@@ -419,6 +431,7 @@ def _do_short(
                     duration=dur,
                     event_metadata=event_meta,
                     scoring_team=_scoring_team_name,
+                    has_logo=_logo_path is not None,
                 )
 
             subtitle_dir = (output or _default_output(clip, "_short")).parent
@@ -461,6 +474,7 @@ def _do_short(
             speed_segments=short_config.speed_segments,
             smart_zoom_frames=short_config.smart_zoom_frames,
             branding=branding_subtitle,
+            logo=short_config.logo,
         )
 
     # Smart zoom: extract frames before iterate or single render
@@ -544,6 +558,7 @@ def _do_short(
                     audio_codec=short_config.audio_codec,
                     audio_bitrate=short_config.audio_bitrate,
                     smart_zoom_frames=short_config.smart_zoom_frames,
+                    logo=short_config.logo,
                 )
 
         source_fps = extracted_frames.fps if extracted_frames is not None else 30.0
@@ -602,6 +617,8 @@ def _do_short(
                         game_event=render_game_event,
                         player=player,
                         assists=assists,
+                        queue=queue,
+                        config_profile=profile or "",
                     )
                 except ReelnError as exc:
                     typer.echo(f"Error: {exc}", err=True)
@@ -683,21 +700,55 @@ def _do_short(
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        _post_data: dict[str, Any] = {"plan": plan, "result": result}
-        if render_game_info is not None:
-            _post_data["game_info"] = render_game_info
-        if render_game_event is not None:
-            _post_data["game_event"] = render_game_event
-        if player is not None:
-            _post_data["player"] = player
-        if assists is not None:
-            _post_data["assists"] = assists
-        if _plugin_inputs:
-            _post_data["plugin_inputs"] = _plugin_inputs
-        _get_reg().emit(
-            _RHook.POST_RENDER,
-            _RHookCtx(hook=_RHook.POST_RENDER, data=_post_data),
-        )
+        if queue and not is_preview:
+            # Queue for review instead of publishing immediately
+            from reeln.core.queue import add_to_queue, discover_targets
+
+            resolved_qd = game_dir or _find_game_dir(config.paths.output_dir, clip)
+            if resolved_qd is None:
+                resolved_qd = Path.cwd()
+            loaded_plugins = activate_plugins(config.plugins)
+            targets = discover_targets(loaded_plugins)
+            queue_item = add_to_queue(
+                resolved_qd,
+                result,
+                game_info=render_game_info,
+                game_event=render_game_event,
+                player=player or "",
+                assists=assists or "",
+                plugin_inputs=_plugin_inputs or None,
+                render_profile=render_profile_name or "",
+                format_str=f"{short_config.width}x{short_config.height}",
+                crop_mode=short_config.crop_mode.value,
+                event_id=event_id or "",
+                available_targets=targets,
+                config_profile=profile or "",
+            )
+            _get_reg().emit(
+                _RHook.ON_QUEUE,
+                _RHookCtx(
+                    hook=_RHook.ON_QUEUE,
+                    data={"queue_item": queue_item, "game_info": render_game_info, "game_event": render_game_event},
+                ),
+            )
+            typer.echo(f"Queued: {queue_item.id} — {queue_item.title}")
+        else:
+            # Fast-track: emit POST_RENDER for immediate plugin upload
+            _post_data: dict[str, Any] = {"plan": plan, "result": result}
+            if render_game_info is not None:
+                _post_data["game_info"] = render_game_info
+            if render_game_event is not None:
+                _post_data["game_event"] = render_game_event
+            if player is not None:
+                _post_data["player"] = player
+            if assists is not None:
+                _post_data["assists"] = assists
+            if _plugin_inputs:
+                _post_data["plugin_inputs"] = _plugin_inputs
+            _get_reg().emit(
+                _RHook.POST_RENDER,
+                _RHookCtx(hook=_RHook.POST_RENDER, data=_post_data),
+            )
 
         if result.duration_seconds is not None:
             typer.echo(f"Duration: {result.duration_seconds:.1f}s")
@@ -817,6 +868,7 @@ def short(
     no_branding: bool = typer.Option(False, "--no-branding", help="Disable branding overlay."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
     plugin_input: list[str] = typer.Option([], "--plugin-input", "-I", help="Plugin input as KEY=VALUE (repeatable)."),
+    queue_flag: bool = typer.Option(False, "--queue", "-q", help="Queue for review instead of publishing immediately."),
 ) -> None:
     """Render a 9:16 short from a clip."""
     _do_short(
@@ -848,6 +900,7 @@ def short(
         event_type=event_type,
         no_branding=no_branding,
         plugin_input=plugin_input,
+        queue=queue_flag,
     )
 
 
@@ -1030,6 +1083,7 @@ def apply_profile(
     iterate: bool = typer.Option(False, "--iterate", help="Multi-iteration mode using event type config."),
     debug_flag: bool = typer.Option(False, "--debug", help="Write debug artifacts to game debug directory."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show plan without executing."),
+    queue_flag: bool = typer.Option(False, "--queue", "-q", help="Queue for review instead of publishing immediately."),
 ) -> None:
     """Apply a named render profile to a clip (full-frame, no crop/scale)."""
     from reeln.core.profiles import (
@@ -1050,7 +1104,7 @@ def apply_profile(
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
     if player_numbers_str is not None:
-        scorer, assists_from_roster, _scoring_team_name = _resolve_player_numbers(
+        scorer, assists_from_roster, _scoring_team_name, _ = _resolve_player_numbers(
             player_numbers_str, event_type, game_dir, config.paths.output_dir, clip
         )
         if player_name is None:
@@ -1109,6 +1163,8 @@ def apply_profile(
                     game_event=apply_game_event,
                     player=player_name,
                     assists=assists_str,
+                    queue=queue_flag,
+                    config_profile=profile or "",
                 )
             except ReelnError as exc:
                 typer.echo(f"Error: {exc}", err=True)
@@ -1189,19 +1245,46 @@ def apply_profile(
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        _apply_post: dict[str, Any] = {"plan": plan, "result": result}
-        if apply_game_info is not None:
-            _apply_post["game_info"] = apply_game_info
-        if apply_game_event is not None:
-            _apply_post["game_event"] = apply_game_event
-        if player_name is not None:
-            _apply_post["player"] = player_name
-        if assists_str is not None:
-            _apply_post["assists"] = assists_str
-        _apply_get_reg().emit(
-            _ApplyHook.POST_RENDER,
-            _ApplyHookCtx(hook=_ApplyHook.POST_RENDER, data=_apply_post),
-        )
+        if queue_flag:
+            from reeln.core.queue import add_to_queue, discover_targets
+
+            resolved_apply_qd = resolved_game_dir or Path.cwd()
+            loaded_apply_plugins = activate_plugins(config.plugins)
+            apply_targets = discover_targets(loaded_apply_plugins)
+            queue_item = add_to_queue(
+                resolved_apply_qd,
+                result,
+                game_info=apply_game_info,
+                game_event=apply_game_event,
+                player=player_name or "",
+                assists=assists_str or "",
+                render_profile=render_profile,
+                event_id=event or "",
+                available_targets=apply_targets,
+                config_profile=profile or "",
+            )
+            _apply_get_reg().emit(
+                _ApplyHook.ON_QUEUE,
+                _ApplyHookCtx(
+                    hook=_ApplyHook.ON_QUEUE,
+                    data={"queue_item": queue_item, "game_info": apply_game_info, "game_event": apply_game_event},
+                ),
+            )
+            typer.echo(f"Queued: {queue_item.id} — {queue_item.title}")
+        else:
+            _apply_post: dict[str, Any] = {"plan": plan, "result": result}
+            if apply_game_info is not None:
+                _apply_post["game_info"] = apply_game_info
+            if apply_game_event is not None:
+                _apply_post["game_event"] = apply_game_event
+            if player_name is not None:
+                _apply_post["player"] = player_name
+            if assists_str is not None:
+                _apply_post["assists"] = assists_str
+            _apply_get_reg().emit(
+                _ApplyHook.POST_RENDER,
+                _ApplyHookCtx(hook=_ApplyHook.POST_RENDER, data=_apply_post),
+            )
 
         if result.duration_seconds is not None:
             typer.echo(f"Duration: {result.duration_seconds:.1f}s")

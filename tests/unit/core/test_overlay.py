@@ -367,3 +367,37 @@ class TestBuildOverlayContext:
         result = build_overlay_context(ctx, event_metadata={})
         assert result.get("goal_scorer_team") == "ROSEVILLE"
         assert result.get("team_level") == "BANTAM"
+
+    # -- has_logo tests --
+
+    def test_text_right_default_no_logo(self) -> None:
+        ctx = self._base_ctx()
+        result = build_overlay_context(ctx, event_metadata={})
+        assert result.get("goal_overlay_text_right") == "1920"
+
+    def test_text_right_with_logo(self) -> None:
+        ctx = self._base_ctx()
+        result = build_overlay_context(ctx, event_metadata={}, has_logo=True)
+        text_right = int(result.get("goal_overlay_text_right"))
+        # Should be reduced from 1920 by the logo reserve
+        assert text_right < 1920
+        assert text_right == 3 + 1914 - 200  # 1717
+
+    def test_has_logo_reduces_scorer_max_chars(self) -> None:
+        """Long scorer text gets smaller font with logo due to reduced max_chars."""
+        ctx = self._base_ctx(player="A" * 24)  # exactly at no-logo max_chars
+        meta = {"assists": ["#7 Jones"]}
+
+        no_logo = build_overlay_context(ctx, event_metadata=meta)
+        with_logo = build_overlay_context(ctx, event_metadata=meta, has_logo=True)
+
+        # Without logo: 24 chars fits in max_chars=24 -> base size
+        assert int(no_logo.get("goal_scorer_fs")) == 46
+        # With logo: 24 chars exceeds max_chars=18 -> scaled down
+        assert int(with_logo.get("goal_scorer_fs")) < 46
+
+    def test_has_logo_short_name_unchanged(self) -> None:
+        """Short names stay at base font size even with logo."""
+        ctx = self._base_ctx(player="Smith")
+        result = build_overlay_context(ctx, event_metadata={}, has_logo=True)
+        assert int(result.get("goal_scorer_fs")) == 54  # no assists -> base=54

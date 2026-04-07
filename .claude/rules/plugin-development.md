@@ -37,22 +37,25 @@ class MyPlugin:
 
 ## Hook System
 
-**Hook enum** (`reeln.plugins.hooks.Hook`) — 13 lifecycle hooks:
+**Hook enum** (`reeln.plugins.hooks.Hook`) — 16 lifecycle hooks:
 
 | Hook | Emitted when |
 |------|-------------|
 | `PRE_RENDER` | Before a render operation starts |
-| `POST_RENDER` | After a render completes |
+| `POST_RENDER` | After a render completes (fast-track publish) |
 | `ON_CLIP_AVAILABLE` | A new clip file is ready |
 | `ON_EVENT_CREATED` | A new event is created |
 | `ON_EVENT_TAGGED` | An event is tagged/categorized |
 | `ON_GAME_INIT` | `reeln game init` sets up a new game |
 | `ON_GAME_READY` | After all `ON_GAME_INIT` handlers complete — plugins read shared context from init phase |
 | `ON_GAME_FINISH` | `reeln game finish` finalizes a game |
+| `ON_POST_GAME_FINISH` | After all `ON_GAME_FINISH` handlers complete |
 | `ON_HIGHLIGHTS_MERGED` | Segment highlights are merged into a reel |
 | `ON_SEGMENT_START` | A new segment begins |
 | `ON_SEGMENT_COMPLETE` | A segment finishes |
 | `ON_FRAMES_EXTRACTED` | Frames extracted from a clip for smart zoom analysis |
+| `ON_QUEUE` | A render result is added to the queue (`--queue` flag) |
+| `ON_PUBLISH` | A queued item is published to an external target |
 | `ON_ERROR` | An error occurs during any operation |
 
 **HookContext** — frozen dataclass passed to every handler:
@@ -92,6 +95,7 @@ Plugins can implement typed protocols for specific capabilities (`reeln.plugins.
 | `MetadataEnricher` | `enrich(event_data) -> dict` | Enrich event metadata |
 | `Notifier` | `notify(message, *, metadata) -> None` | Send notifications |
 | `Generator` | `generate(context) -> GeneratorResult` | Generate media assets |
+| `Authenticator` | `auth_check() -> list[AuthCheckResult]`, `auth_refresh() -> list[AuthCheckResult]` | Test credentials and refresh tokens |
 
 ## Config Schema
 

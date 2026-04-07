@@ -1,6 +1,8 @@
-"""Plugin management commands: list, enable, disable, search, info, install, update, inputs."""
+"""Plugin management commands: list, enable, disable, search, info, install, update, auth, inputs."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import typer
 
@@ -16,6 +18,7 @@ from reeln.core.plugin_registry import (
     update_all_plugins,
     update_plugin,
 )
+from reeln.models.auth import AuthStatus, PluginAuthReport, plugin_auth_report_to_dict
 from reeln.models.plugin import PluginStatus
 from reeln.plugins.loader import (
     discover_plugins,
@@ -55,9 +58,11 @@ def _version_str(status: PluginStatus) -> str:
 @app.command(name="list")
 def list_plugins(
     refresh: bool = typer.Option(False, "--refresh", help="Force registry refresh."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """List installed and enabled plugins with version info."""
-    config = load_config()
+    config = load_config(path=config_path, profile=profile)
     plugins = discover_plugins()
 
     try:
@@ -371,6 +376,105 @@ def uninstall(
     else:
         typer.echo(f"Failed to uninstall '{name}': {result.error}", err=True)
         raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# plugins auth
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def auth(
+    name: str = typer.Argument("", help="Plugin name (empty = all plugins with auth)."),
+    refresh: bool = typer.Option(False, "--refresh", "-r", help="Force reauthentication."),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+) -> None:
+    """Test authentication for plugins, or force reauthentication."""
+    import json as json_mod
+
+    from reeln.plugins.loader import (
+        activate_plugins,
+        collect_auth_checks,
+        refresh_auth,
+    )
+
+    config = load_config(path=config_path, profile=profile)
+    loaded = activate_plugins(config.plugins)
+
+    if refresh:
+        if not name:
+            typer.echo(error("--refresh requires a plugin name."), err=True)
+            raise typer.Exit(1)
+        report = refresh_auth(loaded, name)
+        if report is None:
+            typer.echo(error(f"Plugin '{name}' not found or does not support auth."), err=True)
+            raise typer.Exit(1)
+        reports = [report]
+    else:
+        reports = collect_auth_checks(loaded, name_filter=name)
+
+    if not reports:
+        if name:
+            typer.echo(f"Plugin '{name}' not found or does not support auth.")
+        else:
+            typer.echo("No plugins with authentication support found.")
+        raise typer.Exit(1)
+
+    if json_output:
+        data = {"plugins": [plugin_auth_report_to_dict(r) for r in reports]}
+        typer.echo(json_mod.dumps(data, indent=2))
+        _exit_on_failure(reports)
+        return
+
+    _render_auth_human(reports)
+    _exit_on_failure(reports)
+
+
+def _auth_status_badge(status: AuthStatus) -> str:
+    """Colored badge for auth status."""
+    if status == AuthStatus.OK:
+        return success("authenticated")
+    if status == AuthStatus.WARN:
+        return warn("warning")
+    if status == AuthStatus.EXPIRED:
+        return warn("expired")
+    if status == AuthStatus.NOT_CONFIGURED:
+        return label("not configured")
+    return error("failed")
+
+
+def _render_auth_human(reports: list[PluginAuthReport]) -> None:
+    """Render auth reports for terminal output."""
+    for report in reports:
+        typer.echo(f"\n  {bold(report.plugin_name)}")
+        for r in report.results:
+            badge = _auth_status_badge(r.status)
+            typer.echo(f"    {r.service}  {badge}")
+            if r.identity:
+                typer.echo(f"      {label('Identity:')}  {r.identity}")
+            if r.expires_at:
+                typer.echo(f"      {label('Expires:')}   {r.expires_at}")
+            if r.scopes:
+                typer.echo(f"      {label('Scopes:')}    {', '.join(r.scopes)}")
+            if r.required_scopes:
+                missing = set(r.required_scopes) - set(r.scopes)
+                if missing:
+                    typer.echo(f"      {warn('Missing:')}   {', '.join(sorted(missing))}")
+            if r.message and r.status != AuthStatus.OK:
+                typer.echo(f"      {r.message}")
+            if r.hint:
+                typer.echo(f"      {label('Hint:')} {r.hint}")
+    typer.echo()
+
+
+def _exit_on_failure(reports: list[PluginAuthReport]) -> None:
+    """Raise ``typer.Exit(1)`` if any result is FAIL or EXPIRED."""
+    for report in reports:
+        for r in report.results:
+            if r.status in (AuthStatus.FAIL, AuthStatus.EXPIRED):
+                raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------------------

@@ -1257,3 +1257,61 @@ def test_event_context_included_in_post_render_hook(
     assert ctx.data["game_event"] is event_sentinel
     assert ctx.data["player"] == "#48 Remitz"
     assert ctx.data["assists"] == "#7 Smith"
+
+
+# ---------------------------------------------------------------------------
+# queue flag — render_iterations queues instead of emitting POST_RENDER
+# ---------------------------------------------------------------------------
+
+
+def test_queue_flag_emits_on_queue(tmp_path: Path, _mock_hook_registry: MagicMock) -> None:
+    """When queue=True, render_iterations emits ON_QUEUE instead of POST_RENDER."""
+    from reeln.models.game import GameInfo
+    from reeln.plugins.hooks import Hook
+
+    clip = tmp_path / "clip.mkv"
+    clip.write_bytes(b"video")
+    output = tmp_path / "out.mp4"
+    config = _make_config()
+
+    short_cfg = ShortConfig(input=clip, output=output, width=1080, height=1920)
+    iter0 = _iteration_temp(output, 0)
+
+    def fake_render(plan: object, **kwargs: object) -> RenderResult:
+        iter0.write_bytes(b"rendered")
+        return _mock_render_result(iter0)
+
+    gi = GameInfo(date="2026-04-06", home_team="North", away_team="South", sport="hockey")
+
+    with (
+        patch(f"{_MOD}.FFmpegRenderer") as MockRenderer,
+        patch(f"{_MOD}.plan_short") as mock_plan,
+        patch(f"{_MOD}.run_ffmpeg"),
+        patch(f"{_MOD}.probe_duration", return_value=10.0),
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_plan.return_value = RenderPlan(inputs=[clip], output=iter0)
+        mock_instance = MagicMock()
+        mock_instance.render.side_effect = fake_render
+        MockRenderer.return_value = mock_instance
+
+        result, messages = render_iterations(
+            clip,
+            ["fullspeed"],
+            config,
+            Path("/usr/bin/ffmpeg"),
+            output,
+            is_short=True,
+            short_config=short_cfg,
+            game_info=gi,
+            queue=True,
+        )
+
+    assert result.output == output
+    assert any("Queued:" in m for m in messages)
+    # Should have emitted ON_QUEUE, not POST_RENDER
+    emit_calls = _mock_hook_registry.emit.call_args_list
+    hooks_emitted = [call[0][0] for call in emit_calls]
+    assert Hook.ON_QUEUE in hooks_emitted
+    assert Hook.POST_RENDER not in hooks_emitted

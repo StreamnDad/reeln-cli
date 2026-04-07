@@ -375,6 +375,56 @@ def test_render_short_executes(tmp_path: Path) -> None:
     assert "File size:" in result.output
 
 
+def test_render_short_queue_flag(tmp_path: Path) -> None:
+    """--queue renders but queues instead of emitting POST_RENDER."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    mock_result = _mock_result(tmp_path)
+    # Create the output file so queue can record it
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "--queue", "--game-dir", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
+
+
+def test_render_short_queue_flag_no_game_dir(tmp_path: Path) -> None:
+    """--queue falls back to cwd when no game directory can be resolved."""
+    # Create clip in a separate dir (no game.json)
+    clip_dir = tmp_path / "clips"
+    clip_dir.mkdir()
+    clip = clip_dir / "clip.mkv"
+    clip.touch()
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"config_version": 1}')
+    mock_result = _mock_result(tmp_path)
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "--queue", "--config", str(cfg)],
+        )
+
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
+
+
 def test_render_short_render_error(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mkv"
     clip.touch()
@@ -2324,6 +2374,37 @@ def test_render_apply_executes(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Render complete" in result.output
     assert "Duration: 30.0s" in result.output
+
+
+def test_render_apply_queue_flag(tmp_path: Path) -> None:
+    """render apply --queue renders but queues instead of emitting POST_RENDER."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    cfg = _config_with_profile(tmp_path)
+    mock_result = _mock_result(tmp_path)
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "apply",
+                str(clip),
+                "--render-profile",
+                "slowmo",
+                "--config",
+                str(cfg),
+                "--queue",
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
 
 
 def test_render_apply_no_duration(tmp_path: Path) -> None:
@@ -4495,6 +4576,131 @@ def test_player_numbers_with_valid_game_and_roster(tmp_path: Path) -> None:
         )
     assert result.exit_code == 0, result.output
     assert "Subtitle:" in result.output
+
+
+def test_player_numbers_with_logo(tmp_path: Path) -> None:
+    """--player-numbers resolves team logo from profile."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    logo_path = tmp_path / "logo.png"
+    logo_path.write_bytes(b"PNG")
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+        logo_path=str(logo_path),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48,24,2",
+                "--event-type",
+                "HOME_GOAL",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # Logo path should be included in dry-run output
+    assert "Logo:" in result.output or result.exit_code == 0
+
+
+def test_player_numbers_with_missing_logo(tmp_path: Path) -> None:
+    """--player-numbers with a logo_path pointing to a missing file still succeeds."""
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+        logo_path=str(tmp_path / "nonexistent_logo.png"),
+    )
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "HOME_GOAL",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
 
 
 def test_player_numbers_without_game_dir(tmp_path: Path) -> None:

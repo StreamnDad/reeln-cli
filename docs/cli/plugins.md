@@ -142,6 +142,64 @@ reeln plugins disable <NAME>
 
 Adds the plugin to the `plugins.disabled` list and removes it from `plugins.enabled` in your config file.
 
+### `reeln plugins uninstall`
+
+Uninstall a plugin and remove it from config.
+
+```bash
+reeln plugins uninstall <NAME>
+reeln plugins uninstall <NAME> --force
+reeln plugins uninstall <NAME> --dry-run
+```
+
+| Argument | Description |
+|---|---|
+| `NAME` | Plugin name to uninstall |
+
+| Option | Description |
+|---|---|
+| `--force`, `-f` | Skip confirmation prompt |
+| `--dry-run` | Preview the uninstall command without executing |
+| `--installer` | Force a specific installer (`pip` or `uv`) |
+
+Prompts for confirmation before uninstalling. Removes the plugin from `plugins.enabled` and adds it to `plugins.disabled` in your config.
+
+### `reeln plugins auth`
+
+Test authentication for plugins, or force reauthentication.
+
+```bash
+reeln plugins auth
+reeln plugins auth google
+reeln plugins auth google --refresh
+reeln plugins auth --json
+```
+
+| Argument | Description |
+|---|---|
+| `NAME` | Plugin name (empty = test all plugins with auth support) |
+
+| Option | Description |
+|---|---|
+| `--refresh`, `-r` | Force reauthentication (requires a plugin name) |
+| `--json` | Output as JSON |
+| `--profile` | Named config profile |
+| `--config` | Explicit config file path |
+
+Checks each plugin that implements the `Authenticator` protocol. Reports per-service status:
+
+| Status | Badge | Meaning |
+|---|---|---|
+| `ok` | `authenticated` | Credentials are valid |
+| `warn` | `warning` | Credentials work but with caveats (e.g., missing scopes) |
+| `expired` | `expired` | Token has expired |
+| `not_configured` | `not configured` | No credentials found |
+| `fail` | `failed` | Authentication check failed |
+
+With `--refresh`, the plugin's `auth_refresh()` method is called to force token renewal (e.g., OAuth refresh flow).
+
+Exits with code 1 if any result is `fail` or `expired`.
+
 ## Plugin registry
 
 reeln maintains a remote plugin registry that lists available plugins, their packages, and capabilities. The registry is fetched from GitHub and cached locally for 1 hour.
@@ -189,6 +247,9 @@ reeln exposes lifecycle hooks that plugins can subscribe to:
 | `ON_HIGHLIGHTS_MERGED` | After game highlights are merged |
 | `ON_SEGMENT_START` | Before segment file I/O begins |
 | `ON_SEGMENT_COMPLETE` | After segment merge and state update |
+| `ON_FRAMES_EXTRACTED` | After frames are extracted for smart zoom analysis |
+| `ON_QUEUE` | After a render result is added to the queue (`--queue` flag) |
+| `ON_PUBLISH` | After a queued item is published to an external target |
 | `ON_ERROR` | When an error occurs in core operations |
 
 Hooks receive a `HookContext` with three fields:
@@ -212,6 +273,7 @@ Plugins can implement typed capability interfaces:
 - **Uploader** — upload rendered media to external services (YouTube, social media, cloud storage)
 - **MetadataEnricher** — enrich event metadata with additional information (LLM descriptions, statistics)
 - **Notifier** — send notifications when events occur (Slack, Discord, email)
+- **Authenticator** — test credentials and refresh tokens (`auth_check()` returns `list[AuthCheckResult]`, `auth_refresh()` forces token renewal)
 
 ## Orchestration pipeline
 

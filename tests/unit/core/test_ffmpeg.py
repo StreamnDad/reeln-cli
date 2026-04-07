@@ -819,6 +819,80 @@ def test_build_short_command_custom_encoding(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# build_short_command — logo (multi-input)
+# ---------------------------------------------------------------------------
+
+
+def test_build_short_command_logo_two_inputs(tmp_path: Path) -> None:
+    """Logo as second input: -loop 1 -i logo.png + -map 0:a?."""
+    logo = tmp_path / "logo.png"
+    plan = RenderPlan(
+        inputs=[tmp_path / "clip.mkv", logo],
+        output=tmp_path / "out.mp4",
+        filter_complex=(
+            "[0:v]scale=1080:-2:flags=lanczos[_prelogo];"
+            "[1:v]scale=-1:202:flags=lanczos[_logo];"
+            "[_prelogo][_logo]overlay=x=1070-w:y=1583-h/2:format=auto:shortest=1"
+        ),
+    )
+    cmd = build_short_command(Path("/usr/bin/ffmpeg"), plan)
+    # First input (video)
+    assert cmd[4] == "-i"
+    assert cmd[5] == str(tmp_path / "clip.mkv")
+    # Second input (logo) prefixed with -loop 1
+    assert cmd[6] == "-loop"
+    assert cmd[7] == "1"
+    assert cmd[8] == "-i"
+    assert cmd[9] == str(logo)
+    # Audio mapping from video input
+    assert "-map" in cmd
+    map_idx = cmd.index("-map")
+    assert cmd[map_idx + 1] == "0:a?"
+
+
+def test_build_short_command_logo_with_vfinal(tmp_path: Path) -> None:
+    """Logo + speed segments: has [vfinal]/[afinal] so uses those maps, not 0:a?."""
+    logo = tmp_path / "logo.png"
+    fc = (
+        "[0:v]split=2[v0][v1];"
+        "[v0]trim=0:5,setpts=PTS-STARTPTS[sv0];"
+        "[v1]trim=5,setpts=PTS-STARTPTS,setpts=PTS/0.5[sv1];"
+        "[sv0][sv1]concat=n=2:v=1:a=0[_prelogo];"
+        "[1:v]scale=-1:202:flags=lanczos[_logo];"
+        "[_prelogo][_logo]overlay=x=1070-w:y=1583-h/2[vfinal];"
+        "[0:a]asplit=2[a0][a1];"
+        "[a0]atrim=0:5,asetpts=PTS-STARTPTS[sa0];"
+        "[a1]atrim=5,asetpts=PTS-STARTPTS,atempo=0.5[sa1];"
+        "[sa0][sa1]concat=n=2:v=0:a=1[afinal]"
+    )
+    plan = RenderPlan(
+        inputs=[tmp_path / "clip.mkv", logo],
+        output=tmp_path / "out.mp4",
+        filter_complex=fc,
+    )
+    cmd = build_short_command(Path("/usr/bin/ffmpeg"), plan)
+    # Should use [vfinal]/[afinal] maps, not 0:a?
+    assert "-map" in cmd
+    map_indices = [i for i, v in enumerate(cmd) if v == "-map"]
+    assert len(map_indices) == 2
+    assert cmd[map_indices[0] + 1] == "[vfinal]"
+    assert cmd[map_indices[1] + 1] == "[afinal]"
+
+
+def test_build_short_command_no_logo_single_input(tmp_path: Path) -> None:
+    """Without logo: no -loop, no extra -i, no -map 0:a?."""
+    plan = RenderPlan(
+        inputs=[tmp_path / "clip.mkv"],
+        output=tmp_path / "out.mp4",
+        filter_complex="scale=1080:-2:flags=lanczos",
+    )
+    cmd = build_short_command(Path("/usr/bin/ffmpeg"), plan)
+    assert cmd.count("-i") == 1
+    assert "-loop" not in cmd
+    assert "0:a?" not in cmd
+
+
+# ---------------------------------------------------------------------------
 # build_extract_frame_command — golden assertions
 # ---------------------------------------------------------------------------
 

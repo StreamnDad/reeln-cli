@@ -58,6 +58,8 @@ reeln doctor          # checks ffmpeg, codecs, config, permissions, plugins
 - **Render profiles** — save and reuse rendering settings, chain them with iterations
 - **Smart zoom** — AI-powered tracking that follows the action (via plugin)
 - **Player overlays** — roster-aware goal overlays with jersey number lookup
+- **Render queue** — stage renders for review, then selectively publish to YouTube, Instagram, TikTok
+- **Team logo overlays** — automatic logo placement on goal shorts from team profiles
 - **Plugin architecture** — lifecycle hooks for YouTube, Instagram, cloud uploads, and more
 - **Flexible configuration** — JSON config, XDG paths, env var overrides, named profiles
 - **Cross-platform** — macOS, Linux, Windows
@@ -84,6 +86,8 @@ reeln game finish
 ```
 
 See the [examples](examples/) for detailed walkthroughs of every workflow.
+
+> Looking for a GUI? [reeln dock](https://github.com/StreamnDad/reeln-dock) is a cross-platform desktop companion for reeln — visual render profiles, clip review, and game management without touching the terminal. Coming soon.
 
 ## Supported sports
 
@@ -128,6 +132,18 @@ See the [examples](examples/) for detailed walkthroughs of every workflow.
 | `reeln render apply` | Apply a render profile (full-frame, no crop) |
 | `reeln render reel` | Assemble rendered shorts into a reel |
 
+### Queue
+
+| Command | Description |
+|---|---|
+| `reeln queue list` | List queued render items |
+| `reeln queue show <ID>` | Show detailed queue item info |
+| `reeln queue edit <ID>` | Edit title/description before publishing |
+| `reeln queue publish <ID>` | Publish to one or all targets (`--target <name>`) |
+| `reeln queue publish-all` | Publish all rendered items |
+| `reeln queue remove <ID>` | Soft-delete queue item |
+| `reeln queue targets` | List available publish targets |
+
 ### Configuration
 
 | Command | Description |
@@ -147,6 +163,8 @@ See the [examples](examples/) for detailed walkthroughs of every workflow.
 | `reeln plugins list` | List installed plugins |
 | `reeln plugins enable <name>` | Enable a plugin |
 | `reeln plugins disable <name>` | Disable a plugin |
+| `reeln plugins uninstall <name>` | Uninstall a plugin |
+| `reeln plugins auth` | Test plugin authentication |
 
 ## Configuration
 
@@ -160,6 +178,20 @@ reeln uses a layered JSON config system:
 ```bash
 reeln config show
 ```
+
+## Smart zoom — AI-powered action tracking
+
+`reeln render short --smart` uses the [OpenAI plugin](https://github.com/StreamnDad/reeln-plugin-openai) to analyse extracted frames and track the action — dynamically cropping and panning the camera to follow the play in your 9:16 short. Read [What happened when I let AI edit my youth hockey videos](https://streamn-dad.medium.com/what-happened-when-i-let-ai-edit-my-youth-hockey-videos-d7ece1883905) for the full story.
+
+Add `--debug` to see exactly what the AI sees: annotated frames with crosshair tracking, crop regions, the full zoom path, and every ffmpeg filter chain.
+
+[Live debug example](https://streamn.dad/examples/reeln-debug/) — real game clip with 16-frame smart zoom tracking.
+
+<p align="center">
+  <a href="https://streamn.dad/examples/reeln-debug/">
+    <img src="https://raw.githubusercontent.com/StreamnDad/reeln-cli/main/assets/debug-preview.png" alt="Smart zoom debug — annotated frame showing crosshair tracking and crop region" width="600">
+  </a>
+</p>
 
 ## Documentation
 

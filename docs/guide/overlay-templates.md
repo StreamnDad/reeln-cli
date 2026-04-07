@@ -18,7 +18,7 @@ ASS (Advanced SubStation Alpha) is a subtitle format that ffmpeg can render dire
 
 reeln ships with two ASS templates:
 
-- **`goal_overlay`** — a lower-third banner showing scorer name, up to two assists, and team name
+- **`goal_overlay`** — a lower-third banner showing scorer name, up to two assists, team name, and team logo
 - **`branding`** — a top-of-frame "reeln" watermark
 
 Reference them with the `builtin:` prefix:
@@ -56,7 +56,20 @@ The overlay context builder populates these variables for ASS templates:
 | `ass_name_outline_color` | Name outline color | `&H00000000` |
 | `goal_overlay_*_x` / `*_y` | Pixel coordinates for each element | `83` |
 
+| `goal_overlay_text_right` | Right edge for text clipping (accommodates logo) | `1800` |
+
 Plus all base context variables: `home_team`, `away_team`, `date`, `sport`, `player`, `event_type`, etc.
+
+### Team logo overlay
+
+When a `TeamProfile` has a `logo_path` set, the goal overlay automatically includes the team logo:
+
+- Logo is scaled to 80% of the overlay box height
+- Positioned right-aligned with a margin inside the box
+- ASS text lines are clipped via `goal_overlay_text_right` so they don't overlap the logo
+- Font sizes adapt to the reduced text area
+
+The logo is composited via ffmpeg's `overlay` filter as a second input, using `-loop 1` for the static image. This works across all four filter chain paths: simple pad/crop, smart pad, speed segments, and speed segments + smart pad.
 
 ### Writing custom ASS templates
 

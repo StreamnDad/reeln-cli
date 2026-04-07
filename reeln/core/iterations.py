@@ -56,6 +56,8 @@ def render_iterations(
     game_event: object | None = None,
     player: str | None = None,
     assists: str | None = None,
+    queue: bool = False,
+    config_profile: str = "",
 ) -> tuple[IterationResult, list[str]]:
     """Render *clip* through multiple profiles and concatenate the results.
 
@@ -132,6 +134,7 @@ def render_iterations(
                     base_ctx,
                     duration=iter_dur,
                     event_metadata=event_metadata,
+                    has_logo=short_config is not None and short_config.logo is not None,
                 )
 
             # Resolve subtitle template
@@ -210,7 +213,7 @@ def render_iterations(
             messages.append(f"Concatenated {len(temp_outputs)} iterations")
             messages.append(f"Output: {output}")
 
-        # Emit POST_RENDER once for the final concatenated output
+        # Emit hooks for the final concatenated output
         from reeln.plugins.hooks import Hook
         from reeln.plugins.hooks import HookContext as PluginContext
         from reeln.plugins.registry import get_registry
@@ -226,21 +229,56 @@ def render_iterations(
             duration_seconds=final_duration,
             file_size_bytes=file_size,
         )
-        # Use the last iteration's plan for filter_complex detection
-        final_plan = plan
-        hook_data: dict[str, Any] = {"plan": final_plan, "result": final_result}
-        if game_info is not None:
-            hook_data["game_info"] = game_info
-        if game_event is not None:
-            hook_data["game_event"] = game_event
-        if player is not None:
-            hook_data["player"] = player
-        if assists is not None:
-            hook_data["assists"] = assists
-        get_registry().emit(
-            Hook.POST_RENDER,
-            PluginContext(hook=Hook.POST_RENDER, data=hook_data),
-        )
+
+        if queue:
+            # Queue for review instead of publishing immediately
+            from reeln.core.queue import add_to_queue, discover_targets
+            from reeln.models.game import GameEvent as _GE
+            from reeln.models.game import GameInfo as _GI
+            from reeln.plugins.loader import activate_plugins as _activate
+
+            _gi = game_info if isinstance(game_info, _GI) else None
+            _ge = game_event if isinstance(game_event, _GE) else None
+            loaded = _activate(config.plugins)
+            targets = discover_targets(loaded)
+            game_dir = output.parent
+            queue_item = add_to_queue(
+                game_dir,
+                final_result,
+                game_info=_gi,
+                game_event=_ge,
+                player=player or "",
+                assists=assists or "",
+                render_profile=",".join(profile_names),
+                format_str=f"{short_config.width}x{short_config.height}" if short_config else "",
+                crop_mode=short_config.crop_mode.value if short_config else "",
+                available_targets=targets,
+                config_profile=config_profile,
+            )
+            get_registry().emit(
+                Hook.ON_QUEUE,
+                PluginContext(
+                    hook=Hook.ON_QUEUE,
+                    data={"queue_item": queue_item, "game_info": _gi, "game_event": _ge},
+                ),
+            )
+            messages.append(f"Queued: {queue_item.id} — {queue_item.title}")
+        else:
+            # Fast-track: emit POST_RENDER for immediate plugin upload
+            final_plan = plan
+            hook_data: dict[str, Any] = {"plan": final_plan, "result": final_result}
+            if game_info is not None:
+                hook_data["game_info"] = game_info
+            if game_event is not None:
+                hook_data["game_event"] = game_event
+            if player is not None:
+                hook_data["player"] = player
+            if assists is not None:
+                hook_data["assists"] = assists
+            get_registry().emit(
+                Hook.POST_RENDER,
+                PluginContext(hook=Hook.POST_RENDER, data=hook_data),
+            )
 
         messages.append("Iteration rendering complete")
         result = IterationResult(

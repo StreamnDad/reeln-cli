@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
+from reeln.models.auth import AuthCheckResult
 from reeln.models.plugin import GeneratorResult
 
 
@@ -46,3 +47,17 @@ class Generator(Protocol):
     def generate(  # pragma: no cover
         self, context: dict[str, Any]
     ) -> GeneratorResult: ...
+
+
+class Authenticator(Protocol):
+    """Protocol for plugins that support auth testing and reauthentication."""
+
+    name: str
+
+    def auth_check(  # pragma: no cover
+        self,
+    ) -> list[AuthCheckResult]: ...
+
+    def auth_refresh(  # pragma: no cover
+        self,
+    ) -> list[AuthCheckResult]: ...
