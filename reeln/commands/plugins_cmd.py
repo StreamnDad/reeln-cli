@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from reeln.commands.style import bold, error, label, success, warn
@@ -55,9 +57,11 @@ def _version_str(status: PluginStatus) -> str:
 @app.command(name="list")
 def list_plugins(
     refresh: bool = typer.Option(False, "--refresh", help="Force registry refresh."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
 ) -> None:
     """List installed and enabled plugins with version info."""
-    config = load_config()
+    config = load_config(path=config_path, profile=profile)
     plugins = discover_plugins()
 
     try:

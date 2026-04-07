@@ -53,6 +53,7 @@ cli/render
 cli/media
 cli/config
 cli/plugins
+cli/queue
 ```
 
 ## Examples

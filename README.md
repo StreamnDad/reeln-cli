@@ -130,6 +130,18 @@ See the [examples](examples/) for detailed walkthroughs of every workflow.
 | `reeln render apply` | Apply a render profile (full-frame, no crop) |
 | `reeln render reel` | Assemble rendered shorts into a reel |
 
+### Queue
+
+| Command | Description |
+|---|---|
+| `reeln queue list` | List queued render items |
+| `reeln queue show <ID>` | Show detailed queue item info |
+| `reeln queue edit <ID>` | Edit title/description before publishing |
+| `reeln queue publish <ID>` | Publish to one or all targets (`--target <name>`) |
+| `reeln queue publish-all` | Publish all rendered items |
+| `reeln queue remove <ID>` | Soft-delete queue item |
+| `reeln queue targets` | List available publish targets |
+
 ### Configuration
 
 | Command | Description |

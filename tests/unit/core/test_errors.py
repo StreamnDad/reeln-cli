@@ -12,6 +12,7 @@ from reeln.core.errors import (
     MediaError,
     PluginError,
     PromptAborted,
+    QueueError,
     ReelnError,
     RegistryError,
     RenderError,
@@ -24,7 +25,10 @@ from reeln.plugins.registry import get_registry
 
 @pytest.mark.parametrize(
     "exc_class",
-    [ConfigError, FFmpegError, SegmentError, RenderError, PluginError, RegistryError, MediaError, PromptAborted],
+    [
+        ConfigError, FFmpegError, SegmentError, RenderError, PluginError,
+        RegistryError, MediaError, QueueError, PromptAborted,
+    ],
 )
 def test_subclass_inherits_from_reeln_error(exc_class: type[ReelnError]) -> None:
     assert issubclass(exc_class, ReelnError)
@@ -41,6 +45,7 @@ def test_subclass_inherits_from_reeln_error(exc_class: type[ReelnError]) -> None
         PluginError,
         RegistryError,
         MediaError,
+        QueueError,
         PromptAborted,
     ],
 )
@@ -59,6 +64,7 @@ def test_inherits_from_exception(exc_class: type[Exception]) -> None:
         PluginError,
         RegistryError,
         MediaError,
+        QueueError,
         PromptAborted,
     ],
 )
@@ -78,6 +84,7 @@ def test_message_preserved(exc_class: type[ReelnError]) -> None:
         PluginError,
         RegistryError,
         MediaError,
+        QueueError,
         PromptAborted,
     ],
 )

@@ -23,6 +23,8 @@ class Hook(Enum):
     ON_SEGMENT_START = "on_segment_start"
     ON_SEGMENT_COMPLETE = "on_segment_complete"
     ON_FRAMES_EXTRACTED = "on_frames_extracted"
+    ON_QUEUE = "on_queue"
+    ON_PUBLISH = "on_publish"
     ON_ERROR = "on_error"
 
 

@@ -20,6 +20,7 @@ reeln provides a hierarchical command structure organized by domain.
 | `reeln render` | Video rendering: short, preview, reel | Available | {doc}`render` |
 | `reeln media` | Media management: prune | Available | {doc}`media` |
 | `reeln plugins` | Plugin management: list, enable, disable | Available | {doc}`plugins` |
+| `reeln queue` | Render queue: list, show, edit, publish, remove, targets | Available | {doc}`queue` |
 
 ## Global options
 

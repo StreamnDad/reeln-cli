@@ -375,6 +375,56 @@ def test_render_short_executes(tmp_path: Path) -> None:
     assert "File size:" in result.output
 
 
+def test_render_short_queue_flag(tmp_path: Path) -> None:
+    """--queue renders but queues instead of emitting POST_RENDER."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    mock_result = _mock_result(tmp_path)
+    # Create the output file so queue can record it
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "--queue", "--game-dir", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
+
+
+def test_render_short_queue_flag_no_game_dir(tmp_path: Path) -> None:
+    """--queue falls back to cwd when no game directory can be resolved."""
+    # Create clip in a separate dir (no game.json)
+    clip_dir = tmp_path / "clips"
+    clip_dir.mkdir()
+    clip = clip_dir / "clip.mkv"
+    clip.touch()
+    cfg = tmp_path / "config.json"
+    cfg.write_text('{"config_version": 1}')
+    mock_result = _mock_result(tmp_path)
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_renderer_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_renderer_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            ["render", "short", str(clip), "--queue", "--config", str(cfg)],
+        )
+
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
+
+
 def test_render_short_render_error(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mkv"
     clip.touch()
@@ -2324,6 +2374,37 @@ def test_render_apply_executes(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Render complete" in result.output
     assert "Duration: 30.0s" in result.output
+
+
+def test_render_apply_queue_flag(tmp_path: Path) -> None:
+    """render apply --queue renders but queues instead of emitting POST_RENDER."""
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    cfg = _config_with_profile(tmp_path)
+    mock_result = _mock_result(tmp_path)
+    mock_result.output.touch()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.renderer.FFmpegRenderer") as mock_cls,
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.core.queue.update_queue_index"),
+    ):
+        mock_cls.return_value.render.return_value = mock_result
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "apply",
+                str(clip),
+                "--render-profile",
+                "slowmo",
+                "--config",
+                str(cfg),
+                "--queue",
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Queued:" in result.output
 
 
 def test_render_apply_no_duration(tmp_path: Path) -> None:

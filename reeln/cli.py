@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from reeln import __version__
-from reeln.commands import config_cmd, game, hooks_cmd, media, plugins_cmd, render
+from reeln.commands import config_cmd, game, hooks_cmd, media, plugins_cmd, queue_cmd, render
 from reeln.core.log import setup_logging
 
 app = typer.Typer(
@@ -24,6 +24,7 @@ app.add_typer(media.app, name="media")
 app.add_typer(config_cmd.app, name="config")
 app.add_typer(plugins_cmd.app, name="plugins")
 app.add_typer(hooks_cmd.app, name="hooks")
+app.add_typer(queue_cmd.app, name="queue")
 
 
 def _version_callback(value: bool) -> None:

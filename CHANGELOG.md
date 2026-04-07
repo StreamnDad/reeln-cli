@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `reeln queue` command group for staged render-then-publish workflow: list, show, edit, publish, publish-all, remove, targets
+- `--queue` / `-q` flag on `render short` and `render apply` — renders but queues for review instead of publishing immediately
+- Per-target publish tracking — publish to YouTube, review, then selectively push to Instagram/TikTok without re-rendering
+- `ON_QUEUE` and `ON_PUBLISH` lifecycle hooks for plugin integration with the queue workflow
+- Centralized metadata generation (`core/metadata.py`) — auto-generates title and description from game/event context
+- `QueueItem` stores config profile name — `queue publish` loads the same plugin settings used at queue time
+- Queue persistence via `render_queue.json` (per-game directory) with advisory central index for cross-game listing
+- `QueueError` exception class for queue operation errors
+
 ## [0.0.37] - 2026-04-03
 
 ### Added
