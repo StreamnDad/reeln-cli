@@ -51,6 +51,9 @@ def test_exports_generator_result() -> None:
 
 def test_all_matches_expected() -> None:
     expected = {
+        "AuthCheckResult",
+        "AuthStatus",
+        "Authenticator",
         "Generator",
         "GeneratorResult",
         "Hook",
@@ -61,6 +64,7 @@ def test_all_matches_expected() -> None:
         "InputField",
         "MetadataEnricher",
         "Notifier",
+        "PluginAuthReport",
         "PluginInputSchema",
         "Uploader",
         "activate_plugins",

@@ -58,6 +58,8 @@ reeln doctor          # checks ffmpeg, codecs, config, permissions, plugins
 - **Render profiles** — save and reuse rendering settings, chain them with iterations
 - **Smart zoom** — AI-powered tracking that follows the action (via plugin)
 - **Player overlays** — roster-aware goal overlays with jersey number lookup
+- **Render queue** — stage renders for review, then selectively publish to YouTube, Instagram, TikTok
+- **Team logo overlays** — automatic logo placement on goal shorts from team profiles
 - **Plugin architecture** — lifecycle hooks for YouTube, Instagram, cloud uploads, and more
 - **Flexible configuration** — JSON config, XDG paths, env var overrides, named profiles
 - **Cross-platform** — macOS, Linux, Windows
@@ -161,6 +163,8 @@ See the [examples](examples/) for detailed walkthroughs of every workflow.
 | `reeln plugins list` | List installed plugins |
 | `reeln plugins enable <name>` | Enable a plugin |
 | `reeln plugins disable <name>` | Disable a plugin |
+| `reeln plugins uninstall <name>` | Uninstall a plugin |
+| `reeln plugins auth` | Test plugin authentication |
 
 ## Configuration
 

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from reeln.core.errors import PluginError
+from reeln.models.auth import AuthCheckResult, AuthStatus
 from reeln.models.config import PluginsConfig
 from reeln.models.plugin import GeneratorResult
 from reeln.plugins.hooks import Hook, HookContext
@@ -19,10 +20,12 @@ from reeln.plugins.loader import (
     _parse_allowed_hooks,
     _register_plugin_hooks,
     activate_plugins,
+    collect_auth_checks,
     collect_doctor_checks,
     discover_plugins,
     load_enabled_plugins,
     load_plugin,
+    refresh_auth,
     set_enforce_hooks_override,
 )
 from reeln.plugins.registry import HookRegistry, get_registry, reset_registry
@@ -914,3 +917,226 @@ def test_activate_plugins_clears_input_collector_on_reactivation() -> None:
     fields = collector.fields_for_command("game_init")
     assert len(fields) == 1  # Not 2
     reset_registry()
+
+
+# ---------------------------------------------------------------------------
+# _detect_capabilities — authenticator
+# ---------------------------------------------------------------------------
+
+
+def test_detect_capabilities_authenticator() -> None:
+    """Plugins with auth_check() are detected as authenticator."""
+
+    class AuthPlugin:
+        name = "auth"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return []
+
+        def auth_refresh(self) -> list[AuthCheckResult]:
+            return []
+
+    caps = _detect_capabilities(AuthPlugin())
+    assert "authenticator" in caps
+
+
+def test_detect_capabilities_no_authenticator() -> None:
+    """Plugins without auth_check() are not detected as authenticator."""
+    caps = _detect_capabilities(_NoCaps())
+    assert "authenticator" not in caps
+
+
+# ---------------------------------------------------------------------------
+# collect_auth_checks
+# ---------------------------------------------------------------------------
+
+
+def test_collect_auth_checks_from_plugin() -> None:
+    """Collects AuthCheckResult instances from plugins that expose auth_check()."""
+
+    class AuthPlugin:
+        name = "google"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [
+                AuthCheckResult(
+                    service="YouTube",
+                    status=AuthStatus.OK,
+                    message="Connected",
+                    identity="StreamnDad",
+                )
+            ]
+
+    loaded = {"google": AuthPlugin()}
+    reports = collect_auth_checks(loaded)
+
+    assert len(reports) == 1
+    assert reports[0].plugin_name == "google"
+    assert len(reports[0].results) == 1
+    assert reports[0].results[0].service == "YouTube"
+    assert reports[0].results[0].status == AuthStatus.OK
+    assert reports[0].results[0].identity == "StreamnDad"
+
+
+def test_collect_auth_checks_skips_plugins_without() -> None:
+    """Plugins without auth_check() are silently skipped."""
+
+    class PlainPlugin:
+        name = "plain"
+
+    loaded = {"plain": PlainPlugin()}
+    reports = collect_auth_checks(loaded)
+
+    assert reports == []
+
+
+def test_collect_auth_checks_name_filter() -> None:
+    """name_filter restricts checks to a single plugin."""
+
+    class AuthA:
+        name = "a"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [AuthCheckResult(service="A", status=AuthStatus.OK, message="ok")]
+
+    class AuthB:
+        name = "b"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [AuthCheckResult(service="B", status=AuthStatus.OK, message="ok")]
+
+    loaded = {"a": AuthA(), "b": AuthB()}
+    reports = collect_auth_checks(loaded, name_filter="b")
+
+    assert len(reports) == 1
+    assert reports[0].plugin_name == "b"
+
+
+def test_collect_auth_checks_name_filter_no_match() -> None:
+    """name_filter for a non-existent plugin returns empty."""
+
+    class AuthPlugin:
+        name = "x"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [AuthCheckResult(service="X", status=AuthStatus.OK, message="ok")]
+
+    loaded = {"x": AuthPlugin()}
+    reports = collect_auth_checks(loaded, name_filter="missing")
+
+    assert reports == []
+
+
+def test_collect_auth_checks_handles_exception(caplog: pytest.LogCaptureFixture) -> None:
+    """Failures in auth_check() are caught and reported as FAIL."""
+
+    class BadPlugin:
+        name = "bad"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            raise RuntimeError("boom")
+
+    loaded = {"bad": BadPlugin()}
+    with caplog.at_level(logging.WARNING):
+        reports = collect_auth_checks(loaded)
+
+    assert len(reports) == 1
+    assert reports[0].plugin_name == "bad"
+    assert reports[0].results[0].status == AuthStatus.FAIL
+    assert "auth_check()" in reports[0].results[0].message
+    assert "bad" in caplog.text
+
+
+def test_collect_auth_checks_empty() -> None:
+    """Empty loaded plugins returns empty list."""
+    assert collect_auth_checks({}) == []
+
+
+def test_collect_auth_checks_multiple_plugins() -> None:
+    """Collects auth checks from multiple plugins."""
+
+    class PluginA:
+        name = "a"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [AuthCheckResult(service="SvcA", status=AuthStatus.OK, message="ok")]
+
+    class PluginB:
+        name = "b"
+
+        def auth_check(self) -> list[AuthCheckResult]:
+            return [
+                AuthCheckResult(service="SvcB1", status=AuthStatus.OK, message="ok"),
+                AuthCheckResult(service="SvcB2", status=AuthStatus.WARN, message="warn"),
+            ]
+
+    loaded = {"a": PluginA(), "b": PluginB()}
+    reports = collect_auth_checks(loaded)
+
+    assert len(reports) == 2
+    total_results = sum(len(r.results) for r in reports)
+    assert total_results == 3
+
+
+# ---------------------------------------------------------------------------
+# refresh_auth
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_auth_success() -> None:
+    """refresh_auth returns report from auth_refresh()."""
+
+    class AuthPlugin:
+        name = "tiktok"
+
+        def auth_refresh(self) -> list[AuthCheckResult]:
+            return [
+                AuthCheckResult(
+                    service="TikTok",
+                    status=AuthStatus.OK,
+                    message="Refreshed",
+                )
+            ]
+
+    loaded = {"tiktok": AuthPlugin()}
+    report = refresh_auth(loaded, "tiktok")
+
+    assert report is not None
+    assert report.plugin_name == "tiktok"
+    assert report.results[0].status == AuthStatus.OK
+
+
+def test_refresh_auth_plugin_not_loaded() -> None:
+    """refresh_auth returns None for a plugin that is not loaded."""
+    report = refresh_auth({}, "missing")
+    assert report is None
+
+
+def test_refresh_auth_no_auth_refresh_method() -> None:
+    """refresh_auth returns None for plugins without auth_refresh()."""
+
+    class PlainPlugin:
+        name = "plain"
+
+    loaded = {"plain": PlainPlugin()}
+    report = refresh_auth(loaded, "plain")
+    assert report is None
+
+
+def test_refresh_auth_handles_exception(caplog: pytest.LogCaptureFixture) -> None:
+    """Failures in auth_refresh() are caught and reported as FAIL."""
+
+    class BadPlugin:
+        name = "bad"
+
+        def auth_refresh(self) -> list[AuthCheckResult]:
+            raise RuntimeError("refresh failed")
+
+    loaded = {"bad": BadPlugin()}
+    with caplog.at_level(logging.WARNING):
+        report = refresh_auth(loaded, "bad")
+
+    assert report is not None
+    assert report.results[0].status == AuthStatus.FAIL
+    assert "auth_refresh()" in report.results[0].message
+    assert "bad" in caplog.text

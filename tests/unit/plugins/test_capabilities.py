@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from reeln.models.auth import AuthCheckResult, AuthStatus
 from reeln.models.plugin import GeneratorResult
-from reeln.plugins.capabilities import Generator, MetadataEnricher, Notifier, Uploader
+from reeln.plugins.capabilities import Authenticator, Generator, MetadataEnricher, Notifier, Uploader
 
 # ---------------------------------------------------------------------------
 # Uploader protocol
@@ -112,3 +113,52 @@ def test_generator_protocol_satisfied() -> None:
 def test_generator_has_name() -> None:
     gen: Generator = _StubGenerator()
     assert gen.name == "generator"
+
+
+# ---------------------------------------------------------------------------
+# Authenticator protocol
+# ---------------------------------------------------------------------------
+
+
+class _StubAuthenticator:
+    name: str = "auth-stub"
+
+    def auth_check(self) -> list[AuthCheckResult]:
+        return [
+            AuthCheckResult(
+                service="TestService",
+                status=AuthStatus.OK,
+                message="Connected",
+                identity="test-user",
+            )
+        ]
+
+    def auth_refresh(self) -> list[AuthCheckResult]:
+        return [
+            AuthCheckResult(
+                service="TestService",
+                status=AuthStatus.OK,
+                message="Refreshed",
+                identity="test-user",
+            )
+        ]
+
+
+def test_authenticator_protocol_satisfied() -> None:
+    auth: Authenticator = _StubAuthenticator()
+    results = auth.auth_check()
+    assert len(results) == 1
+    assert results[0].service == "TestService"
+    assert results[0].status == AuthStatus.OK
+
+
+def test_authenticator_refresh() -> None:
+    auth: Authenticator = _StubAuthenticator()
+    results = auth.auth_refresh()
+    assert len(results) == 1
+    assert results[0].message == "Refreshed"
+
+
+def test_authenticator_has_name() -> None:
+    auth: Authenticator = _StubAuthenticator()
+    assert auth.name == "auth-stub"

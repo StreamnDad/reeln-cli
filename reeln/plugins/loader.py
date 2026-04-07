@@ -8,6 +8,7 @@ from typing import Any
 
 from reeln.core.errors import PluginError
 from reeln.core.log import get_logger
+from reeln.models.auth import AuthCheckResult, AuthStatus, PluginAuthReport
 from reeln.models.config import PluginsConfig
 from reeln.models.doctor import DoctorCheck
 from reeln.models.plugin import PluginInfo
@@ -40,6 +41,7 @@ _CAPABILITY_CHECKS: list[tuple[str, str]] = [
     ("uploader", "upload"),
     ("notifier", "notify"),
     ("doctor", "doctor_checks"),
+    ("authenticator", "auth_check"),
 ]
 
 
@@ -326,3 +328,80 @@ def collect_doctor_checks(loaded_plugins: dict[str, object]) -> list[DoctorCheck
                 exc_info=True,
             )
     return checks
+
+
+def collect_auth_checks(
+    loaded_plugins: dict[str, object],
+    *,
+    name_filter: str = "",
+) -> list[PluginAuthReport]:
+    """Collect auth check results from loaded plugins.
+
+    Calls ``auth_check()`` on each plugin that exposes it.
+    When *name_filter* is non-empty, only that plugin is checked.
+    """
+    reports: list[PluginAuthReport] = []
+    for pname, plugin in loaded_plugins.items():
+        if name_filter and pname != name_filter:
+            continue
+        fn = getattr(plugin, "auth_check", None)
+        if not callable(fn):
+            continue
+        try:
+            results = fn()
+            reports.append(PluginAuthReport(plugin_name=pname, results=results))
+        except Exception:
+            log.warning(
+                "Plugin %s auth_check() failed, skipping",
+                pname,
+                exc_info=True,
+            )
+            reports.append(
+                PluginAuthReport(
+                    plugin_name=pname,
+                    results=[
+                        AuthCheckResult(
+                            service=pname,
+                            status=AuthStatus.FAIL,
+                            message="auth_check() raised an exception",
+                        )
+                    ],
+                )
+            )
+    return reports
+
+
+def refresh_auth(
+    loaded_plugins: dict[str, object],
+    name: str,
+) -> PluginAuthReport | None:
+    """Force reauthentication for a single plugin.
+
+    Returns the auth report, or ``None`` if the plugin is not loaded or
+    does not support auth.
+    """
+    plugin = loaded_plugins.get(name)
+    if plugin is None:
+        return None
+    fn = getattr(plugin, "auth_refresh", None)
+    if not callable(fn):
+        return None
+    try:
+        results = fn()
+        return PluginAuthReport(plugin_name=name, results=results)
+    except Exception:
+        log.warning(
+            "Plugin %s auth_refresh() failed",
+            name,
+            exc_info=True,
+        )
+        return PluginAuthReport(
+            plugin_name=name,
+            results=[
+                AuthCheckResult(
+                    service=name,
+                    status=AuthStatus.FAIL,
+                    message="auth_refresh() raised an exception",
+                )
+            ],
+        )

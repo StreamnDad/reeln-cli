@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from reeln.cli import app
 from reeln.core.errors import RegistryError
 from reeln.core.plugin_registry import PipResult
+from reeln.models.auth import AuthCheckResult, AuthStatus, PluginAuthReport
 from reeln.models.config import AppConfig, PluginsConfig
 from reeln.models.plugin import PluginInfo, PluginStatus, RegistryEntry
 from reeln.models.plugin_schema import ConfigField, PluginConfigSchema
@@ -1034,3 +1035,379 @@ def test_plugins_inputs_required_field() -> None:
         result = runner.invoke(app, ["plugins", "inputs", "--command", "game_init"])
     assert result.exit_code == 0
     assert "(required)" in result.output
+
+
+# ---------------------------------------------------------------------------
+# plugins auth
+# ---------------------------------------------------------------------------
+
+
+def test_auth_no_plugins() -> None:
+    """Exit 1 when no plugins support auth."""
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 1
+    assert "No plugins with authentication support found" in result.output
+
+
+def test_auth_single_plugin_ok() -> None:
+    """Successful auth check for a single plugin."""
+    report = PluginAuthReport(
+        plugin_name="google",
+        results=[
+            AuthCheckResult(
+                service="YouTube",
+                status=AuthStatus.OK,
+                message="Connected",
+                identity="StreamnDad Hockey",
+                scopes=["youtube", "youtube.upload"],
+            )
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"google": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "google" in result.output
+    assert "YouTube" in result.output
+    assert "StreamnDad Hockey" in result.output
+    assert "authenticated" in result.output
+
+
+def test_auth_name_filter() -> None:
+    """Filter auth by plugin name."""
+    report = PluginAuthReport(
+        plugin_name="meta",
+        results=[
+            AuthCheckResult(service="Facebook Page", status=AuthStatus.OK, message="ok"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"meta": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]) as mock_collect,
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "meta"])
+    assert result.exit_code == 0
+    assert "meta" in result.output
+    mock_collect.assert_called_once_with({"meta": mock_collect.call_args[0][0]["meta"]}, name_filter="meta")
+
+
+def test_auth_name_filter_no_match() -> None:
+    """Exit 1 when filtered plugin not found."""
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "nonexistent"])
+    assert result.exit_code == 1
+    assert "nonexistent" in result.output
+
+
+def test_auth_fail_exit_code() -> None:
+    """Exit 1 when any check has FAIL status."""
+    report = PluginAuthReport(
+        plugin_name="tiktok",
+        results=[
+            AuthCheckResult(service="TikTok", status=AuthStatus.FAIL, message="Token invalid"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"tiktok": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 1
+    assert "failed" in result.output
+    assert "Token invalid" in result.output
+
+
+def test_auth_expired_exit_code() -> None:
+    """Exit 1 when any check has EXPIRED status."""
+    report = PluginAuthReport(
+        plugin_name="tiktok",
+        results=[
+            AuthCheckResult(service="TikTok", status=AuthStatus.EXPIRED, message="Token expired"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"tiktok": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 1
+    assert "expired" in result.output
+
+
+def test_auth_warn_status_exit_zero() -> None:
+    """Exit 0 when worst status is WARN (not FAIL/EXPIRED)."""
+    report = PluginAuthReport(
+        plugin_name="meta",
+        results=[
+            AuthCheckResult(service="Threads", status=AuthStatus.WARN, message="Limited scope"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"meta": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "warning" in result.output
+
+
+def test_auth_not_configured_exit_zero() -> None:
+    """Exit 0 for NOT_CONFIGURED status."""
+    report = PluginAuthReport(
+        plugin_name="cloudflare",
+        results=[
+            AuthCheckResult(service="R2", status=AuthStatus.NOT_CONFIGURED, message="No env var"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"cloudflare": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "not configured" in result.output
+
+
+def test_auth_json_output() -> None:
+    """JSON output contains expected structure."""
+    report = PluginAuthReport(
+        plugin_name="google",
+        results=[
+            AuthCheckResult(
+                service="YouTube",
+                status=AuthStatus.OK,
+                message="ok",
+                identity="StreamnDad",
+                scopes=["youtube"],
+                required_scopes=["youtube", "youtube.upload"],
+            )
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"google": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "plugins" in data
+    assert data["plugins"][0]["name"] == "google"
+    assert data["plugins"][0]["results"][0]["service"] == "YouTube"
+    assert data["plugins"][0]["results"][0]["status"] == "ok"
+    assert data["plugins"][0]["results"][0]["identity"] == "StreamnDad"
+
+
+def test_auth_json_fail_exit_code() -> None:
+    """JSON output still exits 1 on FAIL."""
+    report = PluginAuthReport(
+        plugin_name="openai",
+        results=[
+            AuthCheckResult(service="OpenAI", status=AuthStatus.FAIL, message="Bad key"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"openai": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "--json"])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["plugins"][0]["results"][0]["status"] == "fail"
+
+
+def test_auth_refresh_success() -> None:
+    """--refresh for a single plugin succeeds."""
+    report = PluginAuthReport(
+        plugin_name="tiktok",
+        results=[
+            AuthCheckResult(service="TikTok", status=AuthStatus.OK, message="Refreshed"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"tiktok": object()}),
+        patch("reeln.plugins.loader.refresh_auth", return_value=report),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "--refresh", "tiktok"])
+    assert result.exit_code == 0
+    assert "authenticated" in result.output
+
+
+def test_auth_refresh_without_name() -> None:
+    """--refresh without a name exits with error."""
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "--refresh"])
+    assert result.exit_code == 1
+    assert "--refresh requires a plugin name" in result.output
+
+
+def test_auth_refresh_plugin_not_found() -> None:
+    """--refresh for a missing plugin exits with error."""
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={}),
+        patch("reeln.plugins.loader.refresh_auth", return_value=None),
+    ):
+        result = runner.invoke(app, ["plugins", "auth", "--refresh", "missing"])
+    assert result.exit_code == 1
+    assert "missing" in result.output
+    assert "not found or does not support auth" in result.output
+
+
+def test_auth_renders_missing_scopes() -> None:
+    """Missing scopes are displayed in human output."""
+    report = PluginAuthReport(
+        plugin_name="meta",
+        results=[
+            AuthCheckResult(
+                service="Threads",
+                status=AuthStatus.WARN,
+                message="Missing scope",
+                scopes=["pages_read"],
+                required_scopes=["pages_read", "threads_basic"],
+            ),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"meta": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "threads_basic" in result.output
+
+
+def test_auth_renders_hint() -> None:
+    """Hints are displayed in human output."""
+    report = PluginAuthReport(
+        plugin_name="meta",
+        results=[
+            AuthCheckResult(
+                service="Facebook Page",
+                status=AuthStatus.FAIL,
+                message="Token invalid",
+                hint="Re-generate token in developer dashboard",
+            ),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"meta": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 1
+    assert "Re-generate token" in result.output
+
+
+def test_auth_renders_expiry() -> None:
+    """Expiry is displayed in human output."""
+    report = PluginAuthReport(
+        plugin_name="tiktok",
+        results=[
+            AuthCheckResult(
+                service="TikTok",
+                status=AuthStatus.OK,
+                message="ok",
+                expires_at="2026-12-31T23:59:59",
+            ),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"tiktok": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "2026-12-31T23:59:59" in result.output
+
+
+def test_auth_multi_service_meta() -> None:
+    """Meta returns multiple service results (Facebook, Instagram, Threads)."""
+    report = PluginAuthReport(
+        plugin_name="meta",
+        results=[
+            AuthCheckResult(service="Facebook Page", status=AuthStatus.OK, message="ok", identity="My Page"),
+            AuthCheckResult(service="Instagram", status=AuthStatus.OK, message="ok", identity="@streamndad"),
+            AuthCheckResult(service="Threads", status=AuthStatus.WARN, message="Limited", hint="Add threads scope"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"meta": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "Facebook Page" in result.output
+    assert "Instagram" in result.output
+    assert "Threads" in result.output
+    assert "My Page" in result.output
+    assert "@streamndad" in result.output
+
+
+def test_auth_required_scopes_all_present() -> None:
+    """When all required scopes are granted, no 'Missing' line appears."""
+    report = PluginAuthReport(
+        plugin_name="google",
+        results=[
+            AuthCheckResult(
+                service="YouTube",
+                status=AuthStatus.OK,
+                message="ok",
+                scopes=["youtube", "youtube.upload"],
+                required_scopes=["youtube", "youtube.upload"],
+            ),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"google": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    assert "Missing" not in result.output
+    assert "Scopes:" in result.output
+
+
+def test_auth_ok_message_not_shown() -> None:
+    """Message is not displayed for OK status (only identity/scopes shown)."""
+    report = PluginAuthReport(
+        plugin_name="google",
+        results=[
+            AuthCheckResult(service="YouTube", status=AuthStatus.OK, message="All good"),
+        ],
+    )
+    with (
+        patch("reeln.commands.plugins_cmd.load_config", return_value=AppConfig()),
+        patch("reeln.plugins.loader.activate_plugins", return_value={"google": object()}),
+        patch("reeln.plugins.loader.collect_auth_checks", return_value=[report]),
+    ):
+        result = runner.invoke(app, ["plugins", "auth"])
+    assert result.exit_code == 0
+    # Message "All good" should NOT appear for OK status (only shown for non-OK)
+    assert "All good" not in result.output

@@ -95,6 +95,7 @@ Plugins can implement typed protocols for specific capabilities (`reeln.plugins.
 | `MetadataEnricher` | `enrich(event_data) -> dict` | Enrich event metadata |
 | `Notifier` | `notify(message, *, metadata) -> None` | Send notifications |
 | `Generator` | `generate(context) -> GeneratorResult` | Generate media assets |
+| `Authenticator` | `auth_check() -> list[AuthCheckResult]`, `auth_refresh() -> list[AuthCheckResult]` | Test credentials and refresh tokens |
 
 ## Config Schema
 

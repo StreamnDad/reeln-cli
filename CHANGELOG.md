@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.0.38] - 2026-04-07
 
 ### Added
 - `reeln queue` command group for staged render-then-publish workflow: list, show, edit, publish, publish-all, remove, targets
@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `QueueItem` stores config profile name — `queue publish` loads the same plugin settings used at queue time
 - Queue persistence via `render_queue.json` (per-game directory) with advisory central index for cross-game listing
 - `QueueError` exception class for queue operation errors
+- Team logo overlay on goal shorts — resolves logo from `TeamProfile.logo_path`, scales to 80% of box height, right-aligned with text clipping. Supports all four filter chain paths (simple pad/crop, smart pad, speed segments, speed segments + smart pad)
+- `reeln plugins auth` command — test authentication for plugins (`--json` for machine output, `--refresh` to force reauthentication)
+- `reeln plugins uninstall` command — uninstall a plugin and remove from config (`--force` to skip confirmation, `--dry-run` to preview)
+- `Authenticator` capability protocol — plugins implement `auth_check()` and `auth_refresh()` for credential verification and token renewal
+- `AuthCheckResult`, `AuthStatus`, `PluginAuthReport` models (`reeln/models/auth.py`) for structured auth status reporting
 
 ## [0.0.37] - 2026-04-03
 
