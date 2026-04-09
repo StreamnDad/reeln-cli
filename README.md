@@ -12,6 +12,10 @@
 
 reeln handles video manipulation, segment/highlight management, and media lifecycle — generic by default, sport-specific through configuration. Built by [Streamn Dad](https://streamn.dad).
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/StreamnDad/reeln-cli/main/assets/reeln-example.webp" alt="reeln in action — youth hockey livestream with scoreboard overlay" width="700">
+</p>
+
 ## Requirements
 
 - **Python 3.11+**
