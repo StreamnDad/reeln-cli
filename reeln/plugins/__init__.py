@@ -5,7 +5,14 @@ from __future__ import annotations
 from reeln.models.auth import AuthCheckResult, AuthStatus, PluginAuthReport
 from reeln.models.plugin import GeneratorResult
 from reeln.models.plugin_input import InputField, PluginInputSchema
-from reeln.plugins.capabilities import Authenticator, Generator, MetadataEnricher, Notifier, Uploader
+from reeln.plugins.capabilities import (
+    Authenticator,
+    Generator,
+    MetadataEnricher,
+    Notifier,
+    Uploader,
+    UploaderSkipped,
+)
 from reeln.plugins.hooks import Hook, HookContext, HookHandler
 from reeln.plugins.inputs import InputCollector, get_input_collector, reset_input_collector
 from reeln.plugins.loader import activate_plugins
@@ -28,6 +35,7 @@ __all__ = [
     "PluginAuthReport",
     "PluginInputSchema",
     "Uploader",
+    "UploaderSkipped",
     "activate_plugins",
     "get_input_collector",
     "get_registry",

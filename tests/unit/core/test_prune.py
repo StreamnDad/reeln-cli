@@ -195,9 +195,9 @@ def test_remove_dir_if_empty_oserror(tmp_path: Path) -> None:
 
 
 def test_prune_game_removes_generated(tmp_path: Path) -> None:
-    """Removes segment merges and highlight reels but keeps event clips."""
+    """Removes segment merges and highlight reels but keeps tagged event clips."""
     events = [
-        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1),
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
     ]
     state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
     _write_state(tmp_path, state)
@@ -214,7 +214,7 @@ def test_prune_game_removes_generated(tmp_path: Path) -> None:
 
     result, messages = prune_game(tmp_path)
 
-    assert event_clip.exists()  # preserved
+    assert event_clip.exists()  # preserved (tagged)
     assert not merge.exists()  # removed
     assert not highlights.exists()  # removed
     assert len(result.removed_paths) == 2
@@ -223,9 +223,9 @@ def test_prune_game_removes_generated(tmp_path: Path) -> None:
 
 
 def test_prune_game_all_files(tmp_path: Path) -> None:
-    """With all_files=True, also removes event clips."""
+    """With all_files=True, also removes tagged event clips."""
     events = [
-        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1),
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
     ]
     state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
     _write_state(tmp_path, state)
@@ -244,6 +244,121 @@ def test_prune_game_all_files(tmp_path: Path) -> None:
     assert len(result.removed_paths) == 2
     # period-1 dir should be removed (now empty)
     assert not p1.exists()
+
+
+def test_prune_game_warns_untagged_clips(tmp_path: Path) -> None:
+    """Without --force, untagged event clips are warned about but not removed."""
+    events = [
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
+        GameEvent(id="b", clip="period-1/Replay_002.mkv", segment_number=1),  # untagged
+    ]
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
+    _write_state(tmp_path, state)
+
+    p1 = tmp_path / "period-1"
+    p1.mkdir()
+    tagged = p1 / "Replay_001.mkv"
+    tagged.write_bytes(b"x" * 50)
+    untagged = p1 / "Replay_002.mkv"
+    untagged.write_bytes(b"x" * 50)
+
+    result, messages = prune_game(tmp_path)
+
+    assert tagged.exists()  # tagged — preserved
+    assert untagged.exists()  # untagged — not removed without --force
+    assert len(result.removed_paths) == 0
+    assert any("untagged clip(s)" in m for m in messages)
+    assert any("--force" in m for m in messages)
+    assert any("Replay_002.mkv" in m for m in messages)
+
+
+def test_prune_game_force_removes_untagged(tmp_path: Path) -> None:
+    """With --force, untagged event clips are removed."""
+    events = [
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
+        GameEvent(id="b", clip="period-1/Replay_002.mkv", segment_number=1),  # untagged
+    ]
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
+    _write_state(tmp_path, state)
+
+    p1 = tmp_path / "period-1"
+    p1.mkdir()
+    tagged = p1 / "Replay_001.mkv"
+    tagged.write_bytes(b"x" * 50)
+    untagged = p1 / "Replay_002.mkv"
+    untagged.write_bytes(b"x" * 50)
+
+    result, messages = prune_game(tmp_path, force=True)
+
+    assert tagged.exists()  # tagged — preserved
+    assert not untagged.exists()  # untagged — removed with --force
+    assert len(result.removed_paths) == 1
+    assert not any("untagged clip(s)" in m for m in messages)
+
+
+def test_prune_game_force_with_generated(tmp_path: Path) -> None:
+    """With --force, both untagged clips and generated files are removed."""
+    events = [
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
+        GameEvent(id="b", clip="period-1/Replay_002.mkv", segment_number=1),  # untagged
+    ]
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
+    _write_state(tmp_path, state)
+
+    p1 = tmp_path / "period-1"
+    p1.mkdir()
+    (p1 / "Replay_001.mkv").write_bytes(b"x" * 50)
+    (p1 / "Replay_002.mkv").write_bytes(b"x" * 50)
+    merge = p1 / "period-1_2026-02-26.mkv"
+    merge.write_bytes(b"x" * 200)
+
+    result, _messages = prune_game(tmp_path, force=True)
+
+    assert (p1 / "Replay_001.mkv").exists()  # tagged — preserved
+    assert not (p1 / "Replay_002.mkv").exists()  # untagged — removed
+    assert not merge.exists()  # generated — removed
+    assert len(result.removed_paths) == 2
+
+
+def test_prune_game_all_overrides_force(tmp_path: Path) -> None:
+    """--all removes everything including tagged clips, regardless of --force."""
+    events = [
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1, event_type="goal"),
+        GameEvent(id="b", clip="period-1/Replay_002.mkv", segment_number=1),  # untagged
+    ]
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
+    _write_state(tmp_path, state)
+
+    p1 = tmp_path / "period-1"
+    p1.mkdir()
+    (p1 / "Replay_001.mkv").write_bytes(b"x" * 50)
+    (p1 / "Replay_002.mkv").write_bytes(b"x" * 50)
+
+    result, _messages = prune_game(tmp_path, all_files=True)
+
+    assert not (p1 / "Replay_001.mkv").exists()  # removed with --all
+    assert not (p1 / "Replay_002.mkv").exists()  # removed with --all
+    assert len(result.removed_paths) == 2
+
+
+def test_prune_game_untagged_dry_run(tmp_path: Path) -> None:
+    """Dry run with --force reports untagged clips but doesn't remove them."""
+    events = [
+        GameEvent(id="a", clip="period-1/Replay_001.mkv", segment_number=1),  # untagged
+    ]
+    state = _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events)
+    _write_state(tmp_path, state)
+
+    p1 = tmp_path / "period-1"
+    p1.mkdir()
+    clip = p1 / "Replay_001.mkv"
+    clip.write_bytes(b"x" * 50)
+
+    result, messages = prune_game(tmp_path, force=True, dry_run=True)
+
+    assert clip.exists()  # dry run — not actually removed
+    assert len(result.removed_paths) == 1
+    assert any("Would remove" in m for m in messages)
 
 
 def test_prune_game_removes_temp_files(tmp_path: Path) -> None:
@@ -530,7 +645,7 @@ def test_prune_all_dry_run(tmp_path: Path) -> None:
 
 def test_prune_all_with_all_files(tmp_path: Path) -> None:
     g1 = tmp_path / "game1"
-    events = [GameEvent(id="a", clip="clip.mkv", segment_number=1)]
+    events = [GameEvent(id="a", clip="clip.mkv", segment_number=1, event_type="goal")]
     _write_state(g1, _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events))
     (g1 / "clip.mkv").write_bytes(b"x" * 50)
 
@@ -538,6 +653,31 @@ def test_prune_all_with_all_files(tmp_path: Path) -> None:
 
     assert not (g1 / "clip.mkv").exists()
     assert len(result.removed_paths) == 1
+
+
+def test_prune_all_with_force(tmp_path: Path) -> None:
+    g1 = tmp_path / "game1"
+    events = [GameEvent(id="a", clip="clip.mkv", segment_number=1)]  # untagged
+    _write_state(g1, _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events))
+    (g1 / "clip.mkv").write_bytes(b"x" * 50)
+
+    result, _messages = prune_all(tmp_path, force=True)
+
+    assert not (g1 / "clip.mkv").exists()
+    assert len(result.removed_paths) == 1
+
+
+def test_prune_all_warns_untagged_without_force(tmp_path: Path) -> None:
+    g1 = tmp_path / "game1"
+    events = [GameEvent(id="a", clip="clip.mkv", segment_number=1)]  # untagged
+    _write_state(g1, _make_state(finished=True, finished_at="2026-02-26T14:00:00+00:00", events=events))
+    (g1 / "clip.mkv").write_bytes(b"x" * 50)
+
+    result, messages = prune_all(tmp_path)
+
+    assert (g1 / "clip.mkv").exists()  # not removed without --force
+    assert len(result.removed_paths) == 0
+    assert any("untagged clip(s)" in m for m in messages)
 
 
 def test_prune_all_nothing_to_prune(tmp_path: Path) -> None:

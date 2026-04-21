@@ -103,16 +103,20 @@ def prune_game(
     game_dir: Path,
     *,
     all_files: bool = False,
+    force: bool = False,
     dry_run: bool = False,
 ) -> tuple[PruneResult, list[str]]:
     """Remove generated artifacts from a finished game directory.
 
     By default, removes generated files (segment merges, highlight reels,
-    rendered shorts, compilations, temp files) while preserving raw event
-    clips and ``game.json``.
+    rendered shorts, compilations, temp files) while preserving tagged
+    event clips and ``game.json``.  Untagged event clips (no ``event_type``)
+    are warned about but not removed unless *force* is set.
 
-    With *all_files*, also removes raw event clips — everything except
-    ``game.json``.
+    With *force*, also removes untagged event clips — clips that exist in
+    the event list but have no ``event_type`` assigned.
+
+    With *all_files*, removes everything except ``game.json``.
 
     Raises ``MediaError`` if the game is not finished.
     """
@@ -121,7 +125,9 @@ def prune_game(
     if not state.finished:
         raise MediaError("Game must be finished before pruning")
 
-    event_clips: set[str] = {ev.clip for ev in state.events}
+    tagged_clips: set[str] = {ev.clip for ev in state.events if ev.event_type}
+    untagged_clips: set[str] = {ev.clip for ev in state.events if not ev.event_type}
+    skipped_untagged: list[str] = []
 
     result = PruneResult()
 
@@ -147,10 +153,18 @@ def prune_game(
         if suffix not in _VIDEO_EXTENSIONS:
             continue
 
-        is_event_clip = rel in event_clips
+        is_tagged = rel in tagged_clips
+        is_untagged = rel in untagged_clips
 
-        if is_event_clip and not all_files:
-            # Preserve source event clips unless --all
+        if is_tagged and not all_files:
+            # Always preserve tagged event clips unless --all
+            continue
+
+        if is_untagged and not all_files:
+            if force:
+                _remove_file(path, dry_run, result)
+            else:
+                skipped_untagged.append(rel)
             continue
 
         _remove_file(path, dry_run, result)
@@ -173,6 +187,15 @@ def prune_game(
             _remove_dir_if_empty(child, dry_run)
 
     messages = _build_prune_summary(result, dry_run)
+
+    if skipped_untagged:
+        messages.append(
+            f"Warning: {len(skipped_untagged)} untagged clip(s) not removed "
+            "(use --force to remove):"
+        )
+        for clip in skipped_untagged:
+            messages.append(f"  {clip}")
+
     if not dry_run:
         log.info("Pruned %s: %d files, %s freed", game_dir, len(result.removed_paths), format_bytes(result.bytes_freed))
 
@@ -205,6 +228,7 @@ def prune_all(
     base: Path,
     *,
     all_files: bool = False,
+    force: bool = False,
     dry_run: bool = False,
 ) -> tuple[PruneResult, list[str]]:
     """Prune all finished game directories under *base*.
@@ -225,7 +249,7 @@ def prune_all(
             messages.append(f"Skipping {game_dir.name}: not finished")
             continue
 
-        result, game_messages = prune_game(game_dir, all_files=all_files, dry_run=dry_run)
+        result, game_messages = prune_game(game_dir, all_files=all_files, force=force, dry_run=dry_run)
         combined.removed_paths.extend(result.removed_paths)
         combined.bytes_freed += result.bytes_freed
         combined.errors.extend(result.errors)

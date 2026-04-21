@@ -29,6 +29,7 @@ from reeln.core.queue import (
 from reeln.models.game import GameEvent, GameInfo
 from reeln.models.queue import (
     PublishStatus,
+    PublishTargetResult,
     QueueItem,
     QueueStatus,
     RenderQueue,
@@ -60,8 +61,10 @@ def _game_event() -> GameEvent:
     )
 
 
-def _render_result(tmp_path: Path) -> RenderResult:
-    out = tmp_path / "short.mp4"
+def _render_result(
+    tmp_path: Path, output_name: str = "short.mp4"
+) -> RenderResult:
+    out = tmp_path / output_name
     out.write_bytes(b"fake video")
     return RenderResult(output=out, duration_seconds=15.0, file_size_bytes=1024)
 
@@ -179,14 +182,150 @@ def test_add_to_queue_no_targets(tmp_path: Path) -> None:
     assert item.publish_targets == ()
 
 
-def test_add_to_queue_multiple(tmp_path: Path) -> None:
-    result = _render_result(tmp_path)
+def test_add_to_queue_multiple_different_files(tmp_path: Path) -> None:
+    """Adding two items with DIFFERENT output files keeps both active."""
+    result_a = _render_result(tmp_path, output_name="a.mp4")
+    result_b = _render_result(tmp_path, output_name="b.mp4")
     with patch("reeln.core.queue.update_queue_index"):
-        add_to_queue(tmp_path, result)
-        add_to_queue(tmp_path, result)
+        item_a = add_to_queue(tmp_path, result_a)
+        item_b = add_to_queue(tmp_path, result_b)
     queue = load_queue(tmp_path)
     assert len(queue.items) == 2
     assert queue.items[0].id != queue.items[1].id
+    assert all(i.status is QueueStatus.RENDERED for i in queue.items)
+    assert {i.id for i in queue.items} == {item_a.id, item_b.id}
+
+
+def test_add_to_queue_same_file_supersedes_prior_unpublished(
+    tmp_path: Path,
+) -> None:
+    """Re-rendering the same clip soft-deletes the prior unpublished entry.
+
+    REGRESSION: without this, the dock's game-level "Publish All" would
+    iterate both items and upload the same file twice, producing
+    duplicate IG Reels / YouTube videos / TikTok posts. See commit
+    message for the production incident.
+    """
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        first = add_to_queue(tmp_path, result)
+        second = add_to_queue(tmp_path, result)
+    queue = load_queue(tmp_path)
+
+    # Two items total but only the second is active.
+    assert len(queue.items) == 2
+    by_id = {i.id: i for i in queue.items}
+    assert by_id[first.id].status is QueueStatus.REMOVED
+    assert by_id[second.id].status is QueueStatus.RENDERED
+
+    # publish_all only iterates RENDERED items, so it would only publish
+    # `second`. Verify this is observable.
+    rendered_ids = [
+        i.id for i in queue.items if i.status is QueueStatus.RENDERED
+    ]
+    assert rendered_ids == [second.id]
+
+
+def test_add_to_queue_same_file_preserves_published_item(
+    tmp_path: Path,
+) -> None:
+    """An already-published item with the same output file is NOT
+    superseded. Published items are kept as historical records and
+    their status already prevents re-publishing."""
+    from dataclasses import replace as _replace
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        first = add_to_queue(tmp_path, result, available_targets=["google"])
+
+    # Manually mark the first item as PUBLISHED (simulating a successful publish).
+    queue = load_queue(tmp_path)
+    published_first = _replace(
+        queue.items[0],
+        status=QueueStatus.PUBLISHED,
+        publish_targets=(
+            PublishTargetResult(
+                target="google",
+                status=PublishStatus.PUBLISHED,
+                url="https://youtu.be/x",
+            ),
+        ),
+    )
+    from reeln.core.queue import save_queue
+    from reeln.models.queue import RenderQueue
+
+    save_queue(
+        RenderQueue(version=queue.version, items=(published_first,)),
+        tmp_path,
+    )
+
+    # Re-render the same clip.
+    with patch("reeln.core.queue.update_queue_index"):
+        second = add_to_queue(tmp_path, result, available_targets=["google"])
+
+    queue = load_queue(tmp_path)
+    # Published item preserved as-is, new item added alongside.
+    assert len(queue.items) == 2
+    by_id = {i.id: i for i in queue.items}
+    assert by_id[first.id].status is QueueStatus.PUBLISHED
+    assert by_id[first.id].publish_targets[0].url == "https://youtu.be/x"
+    assert by_id[second.id].status is QueueStatus.RENDERED
+
+
+def test_add_to_queue_same_file_skips_already_removed(
+    tmp_path: Path,
+) -> None:
+    """Existing REMOVED items aren't touched (idempotent no-op)."""
+    from dataclasses import replace as _replace
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        first = add_to_queue(tmp_path, result)
+
+    queue = load_queue(tmp_path)
+    removed_first = _replace(queue.items[0], status=QueueStatus.REMOVED)
+    from reeln.core.queue import save_queue
+    from reeln.models.queue import RenderQueue
+
+    save_queue(
+        RenderQueue(version=queue.version, items=(removed_first,)),
+        tmp_path,
+    )
+
+    with patch("reeln.core.queue.update_queue_index"):
+        second = add_to_queue(tmp_path, result)
+
+    queue = load_queue(tmp_path)
+    assert len(queue.items) == 2
+    by_id = {i.id: i for i in queue.items}
+    # First stays REMOVED (wasn't re-touched).
+    assert by_id[first.id].status is QueueStatus.REMOVED
+    assert by_id[second.id].status is QueueStatus.RENDERED
+
+
+def test_add_to_queue_same_file_supersedes_multiple(
+    tmp_path: Path,
+) -> None:
+    """Adding a third render with the same file supersedes BOTH prior
+    unpublished items. Models the real user scenario where they rendered
+    Ben Remitz's goal three times."""
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        first = add_to_queue(tmp_path, result)
+        second = add_to_queue(tmp_path, result)
+        third = add_to_queue(tmp_path, result)
+
+    queue = load_queue(tmp_path)
+    assert len(queue.items) == 3
+    by_id = {i.id: i for i in queue.items}
+    assert by_id[first.id].status is QueueStatus.REMOVED
+    assert by_id[second.id].status is QueueStatus.REMOVED
+    assert by_id[third.id].status is QueueStatus.RENDERED
+
+    # Only the third is rendered, so publish_all only publishes once.
+    rendered = [i for i in queue.items if i.status is QueueStatus.RENDERED]
+    assert len(rendered) == 1
+    assert rendered[0].id == third.id
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +553,14 @@ def test_publish_no_pending_targets_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_publish_via_post_render_hook(tmp_path: Path) -> None:
-    """Plugins with on_post_render are published via POST_RENDER hook emission."""
+def test_publish_hook_only_plugin_marked_skipped(tmp_path: Path) -> None:
+    """Plugins with only on_post_render are SKIPPED by manual publish.
+
+    Manual publish (``reeln queue publish``) requires the Uploader protocol
+    (``upload()`` method). Hook-only plugins still fire during ``reeln render``
+    via POST_RENDER, but they are not invoked from manual publish — they are
+    marked SKIPPED with an explanatory reason instead of being lied about.
+    """
     result = _render_result(tmp_path)
     with patch("reeln.core.queue.update_queue_index"):
         added = add_to_queue(tmp_path, result, available_targets=["google"])
@@ -426,13 +571,18 @@ def test_publish_via_post_render_hook(tmp_path: Path) -> None:
     plugins: dict[str, object] = {"google": google}
 
     published = publish_queue_item(tmp_path, added.id, plugins)
-    assert published.status is QueueStatus.PUBLISHED
+    # All targets skipped → item stays RENDERED (re-publishable later).
+    assert published.status is QueueStatus.RENDERED
     google_target = next(t for t in published.publish_targets if t.target == "google")
-    assert google_target.status is PublishStatus.PUBLISHED
+    assert google_target.status is PublishStatus.SKIPPED
+    assert "upload()" in google_target.error
+    # on_post_render should NOT have been invoked — manual publish no longer
+    # emits POST_RENDER.
+    google.on_post_render.assert_not_called()
 
 
 def test_publish_via_hook_target_flag(tmp_path: Path) -> None:
-    """--target works with hook-based plugins."""
+    """--target with a hook-only plugin marks it SKIPPED, not PUBLISHED."""
     result = _render_result(tmp_path)
     with patch("reeln.core.queue.update_queue_index"):
         added = add_to_queue(tmp_path, result, available_targets=["google", "meta"])
@@ -442,11 +592,18 @@ def test_publish_via_hook_target_flag(tmp_path: Path) -> None:
     plugins: dict[str, object] = {"google": google}
 
     published = publish_queue_item(tmp_path, added.id, plugins, target="google")
-    assert published.status is QueueStatus.PARTIAL  # meta still pending
+    # google is SKIPPED, meta is still PENDING → mixed state: PARTIAL.
+    # (SKIPPED is excluded from the overall decision, leaving {PENDING} which
+    # falls through to the PARTIAL fallback.)
+    assert published.status is QueueStatus.PARTIAL
+    google_target = next(t for t in published.publish_targets if t.target == "google")
+    assert google_target.status is PublishStatus.SKIPPED
+    meta_target = next(t for t in published.publish_targets if t.target == "meta")
+    assert meta_target.status is PublishStatus.PENDING
 
 
-def test_publish_via_hook_ad_hoc_target(tmp_path: Path) -> None:
-    """Hook target not in original publish_targets gets appended."""
+def test_publish_hook_only_ad_hoc_target_marked_skipped(tmp_path: Path) -> None:
+    """Ad-hoc hook-only target gets appended with SKIPPED status."""
     result = _render_result(tmp_path)
     with patch("reeln.core.queue.update_queue_index"):
         added = add_to_queue(tmp_path, result)  # no available_targets
@@ -457,62 +614,319 @@ def test_publish_via_hook_ad_hoc_target(tmp_path: Path) -> None:
 
     published = publish_queue_item(tmp_path, added.id, plugins, target="google")
     google_target = next(t for t in published.publish_targets if t.target == "google")
-    assert google_target.status is PublishStatus.PUBLISHED
+    assert google_target.status is PublishStatus.SKIPPED
+    assert "upload()" in google_target.error
 
 
-def test_publish_via_hook_failure_ad_hoc_target(tmp_path: Path) -> None:
-    """Hook failure with ad-hoc target appends failed result."""
-    from reeln.plugins.hooks import Hook
-    from reeln.plugins.registry import get_registry
-
-    result = _render_result(tmp_path)
-    with patch("reeln.core.queue.update_queue_index"):
-        added = add_to_queue(tmp_path, result)  # no available_targets
-
-    google = MagicMock(spec=["on_post_render", "name"])
-    google.name = "google"
-    plugins: dict[str, object] = {"google": google}
-
-    original_emit = get_registry().emit
-
-    def failing_emit(hook: Hook, context: object = None) -> None:
-        if hook is Hook.POST_RENDER:
-            raise RuntimeError("boom")
-        original_emit(hook, context)
-
-    with patch.object(get_registry(), "emit", side_effect=failing_emit):
-        published = publish_queue_item(tmp_path, added.id, plugins, target="google")
-    google_target = next(t for t in published.publish_targets if t.target == "google")
-    assert google_target.status is PublishStatus.FAILED
+# ---------------------------------------------------------------------------
+# UploaderSkipped + SKIPPED-aware overall status
+# ---------------------------------------------------------------------------
 
 
-def test_publish_via_hook_failure(tmp_path: Path) -> None:
-    """POST_RENDER emission failure marks hook targets as failed."""
-    from reeln.plugins.hooks import Hook
-    from reeln.plugins.registry import get_registry
+def test_publish_uploader_skipped_marked_skipped(tmp_path: Path) -> None:
+    """An UploaderSkipped exception maps to PublishStatus.SKIPPED, not FAILED."""
+    from reeln.plugins.capabilities import UploaderSkipped
 
     result = _render_result(tmp_path)
     with patch("reeln.core.queue.update_queue_index"):
         added = add_to_queue(tmp_path, result, available_targets=["google"])
 
-    google = MagicMock(spec=["on_post_render", "name"])
-    google.name = "google"
+    google = MagicMock()
+    google.upload = MagicMock(
+        side_effect=UploaderSkipped("upload_video disabled"),
+    )
     plugins: dict[str, object] = {"google": google}
 
-    # Make the registry emit raise only for POST_RENDER
-    original_emit = get_registry().emit
+    published = publish_queue_item(tmp_path, added.id, plugins)
 
-    def failing_emit(hook: Hook, context: object = None) -> None:
-        if hook is Hook.POST_RENDER:
-            raise RuntimeError("hook boom")
-        original_emit(hook, context)
-
-    with patch.object(get_registry(), "emit", side_effect=failing_emit):
-        published = publish_queue_item(tmp_path, added.id, plugins)
-    assert published.status is QueueStatus.FAILED
     google_target = next(t for t in published.publish_targets if t.target == "google")
+    assert google_target.status is PublishStatus.SKIPPED
+    assert "disabled" in google_target.error
+    # All-skipped case → overall is RENDERED so the item remains re-publishable.
+    assert published.status is QueueStatus.RENDERED
+
+
+def test_publish_uploader_skipped_vs_failed_separation(tmp_path: Path) -> None:
+    """UploaderSkipped and general Exception produce distinct statuses."""
+    from reeln.plugins.capabilities import UploaderSkipped
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["google", "meta"]
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(side_effect=UploaderSkipped("disabled"))
+    meta = MagicMock()
+    meta.upload = MagicMock(side_effect=RuntimeError("boom"))
+    plugins: dict[str, object] = {"google": google, "meta": meta}
+
+    published = publish_queue_item(tmp_path, added.id, plugins)
+
+    google_target = next(t for t in published.publish_targets if t.target == "google")
+    meta_target = next(t for t in published.publish_targets if t.target == "meta")
+    assert google_target.status is PublishStatus.SKIPPED
+    assert meta_target.status is PublishStatus.FAILED
+    assert "boom" in meta_target.error
+    # Non-skipped set is {FAILED} → overall is FAILED.
+    assert published.status is QueueStatus.FAILED
+
+
+def test_publish_overall_status_published_plus_skipped(tmp_path: Path) -> None:
+    """Skipped targets don't drag a successful publish down to PARTIAL."""
+    from reeln.plugins.capabilities import UploaderSkipped
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["google", "meta"]
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(return_value="https://youtu.be/good")
+    meta = MagicMock()
+    meta.upload = MagicMock(side_effect=UploaderSkipped("not configured"))
+    plugins: dict[str, object] = {"google": google, "meta": meta}
+
+    published = publish_queue_item(tmp_path, added.id, plugins)
+
+    google_target = next(t for t in published.publish_targets if t.target == "google")
+    meta_target = next(t for t in published.publish_targets if t.target == "meta")
+    assert google_target.status is PublishStatus.PUBLISHED
+    assert google_target.url == "https://youtu.be/good"
+    assert meta_target.status is PublishStatus.SKIPPED
+    # Non-skipped set is {PUBLISHED} → overall is PUBLISHED (not PARTIAL).
+    assert published.status is QueueStatus.PUBLISHED
+
+
+def test_publish_hook_only_plus_real_uploader_mixed(tmp_path: Path) -> None:
+    """Mixing a real uploader with a hook-only plugin yields PUBLISHED overall."""
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["google", "meta"]
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(return_value="https://youtu.be/real")
+    # Hook-only plugin — no upload() method
+    meta = MagicMock(spec=["on_post_render", "name"])
+    meta.name = "meta"
+    plugins: dict[str, object] = {"google": google, "meta": meta}
+
+    published = publish_queue_item(tmp_path, added.id, plugins)
+
+    google_target = next(t for t in published.publish_targets if t.target == "google")
+    meta_target = next(t for t in published.publish_targets if t.target == "meta")
+    assert google_target.status is PublishStatus.PUBLISHED
+    assert meta_target.status is PublishStatus.SKIPPED
+    assert "upload()" in meta_target.error
+    # Overall: PUBLISHED (non-skipped set is {PUBLISHED}).
+    assert published.status is QueueStatus.PUBLISHED
+    # The hook-only plugin should NOT have been invoked.
+    meta.on_post_render.assert_not_called()
+
+
+def test_publish_enriches_metadata_with_format_and_render_profile(
+    tmp_path: Path,
+) -> None:
+    """QueueItem.format and render_profile flow into upload() metadata.
+
+    Regression for the enrichment logic that lets google/tiktok detect
+    portrait vs landscape without the original render plan.
+    """
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path,
+            result,
+            format_str="1080x1920",
+            render_profile="player-overlay",
+            available_targets=["google"],
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(return_value="https://youtu.be/x")
+    plugins: dict[str, object] = {"google": google}
+
+    publish_queue_item(tmp_path, added.id, plugins)
+
+    call_metadata = google.upload.call_args.kwargs["metadata"]
+    assert call_metadata["format"] == "1080x1920"
+    assert call_metadata["render_profile"] == "player-overlay"
+    assert call_metadata["duration_seconds"] == 15.0
+
+
+def test_publish_omits_duration_when_queue_item_has_none(
+    tmp_path: Path,
+) -> None:
+    """When QueueItem.duration_seconds is None, metadata omits the key
+    rather than including a ``None`` value. Covers the negative branch
+    of the duration_seconds enrichment."""
+    from reeln.models.render_plan import RenderResult
+
+    out = tmp_path / "short.mp4"
+    out.write_bytes(b"fake")
+    result = RenderResult(
+        output=out, duration_seconds=None, file_size_bytes=1024
+    )
+
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path,
+            result,
+            format_str="1080x1920",
+            available_targets=["google"],
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(return_value="https://youtu.be/x")
+    plugins: dict[str, object] = {"google": google}
+
+    publish_queue_item(tmp_path, added.id, plugins)
+
+    call_metadata = google.upload.call_args.kwargs["metadata"]
+    assert "duration_seconds" not in call_metadata
+
+
+def test_publish_seeds_video_url_from_already_published_target(
+    tmp_path: Path,
+) -> None:
+    """Per-target retry on meta consumes cloudflare's already-stored URL.
+
+    Scenario: user clicked Publish All earlier → cloudflare succeeded and
+    stored https://cdn/foo.mp4; google/meta were skipped due to config.
+    User flipped meta config on and clicked Retry (target="meta") — the
+    CLI is only invoked for meta, so cloudflare isn't re-run in THIS
+    publish call. Without seeding, meta's upload() would raise
+    UploaderSkipped("Meta Reels require metadata['video_url']...").
+    With seeding, meta picks up cloudflare's stored URL and publishes.
+    """
+    from reeln.models.queue import PublishTargetResult
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["cloudflare", "meta"]
+        )
+
+    # Mutate the stored queue so cloudflare is already PUBLISHED with a URL
+    from reeln.core.queue import load_queue, save_queue
+    from reeln.models.queue import RenderQueue
+
+    q = load_queue(tmp_path)
+    from dataclasses import replace as _replace
+    updated_item = _replace(
+        q.items[0],
+        publish_targets=(
+            PublishTargetResult(
+                target="cloudflare",
+                status=PublishStatus.PUBLISHED,
+                url="https://cdn.example.com/clip.mp4",
+                published_at="2026-04-10T12:00:00Z",
+            ),
+            PublishTargetResult(
+                target="meta", status=PublishStatus.PENDING
+            ),
+        ),
+    )
+    save_queue(
+        RenderQueue(version=q.version, items=(updated_item,)), tmp_path
+    )
+
+    meta = MagicMock()
+    meta.upload = MagicMock(
+        return_value="https://instagram.com/reel/abc"
+    )
+    plugins: dict[str, object] = {"meta": meta}
+
+    published = publish_queue_item(
+        tmp_path, added.id, plugins, target="meta"
+    )
+
+    # Meta was called with the cloudflare-seeded video_url in metadata
+    meta.upload.assert_called_once()
+    call_metadata = meta.upload.call_args.kwargs["metadata"]
+    assert call_metadata["video_url"] == "https://cdn.example.com/clip.mp4"
+    # Meta target is now PUBLISHED
+    meta_target = next(
+        t for t in published.publish_targets if t.target == "meta"
+    )
+    assert meta_target.status is PublishStatus.PUBLISHED
+    assert meta_target.url == "https://instagram.com/reel/abc"
+
+
+def test_publish_seeds_video_url_skips_non_http_sentinels(
+    tmp_path: Path,
+) -> None:
+    """Non-HTTP sentinel URLs (e.g. tiktok:v_inbox_url~...) must not be
+    threaded as video_url — they're publication identifiers, not
+    hosted-file URLs, and would break meta's Reel API."""
+    from reeln.models.queue import PublishTargetResult
+
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["tiktok", "meta"]
+        )
+
+    from reeln.core.queue import load_queue, save_queue
+    from reeln.models.queue import RenderQueue
+
+    q = load_queue(tmp_path)
+    from dataclasses import replace as _replace
+    updated_item = _replace(
+        q.items[0],
+        publish_targets=(
+            PublishTargetResult(
+                target="tiktok",
+                status=PublishStatus.PUBLISHED,
+                url="tiktok:v_inbox_url~v2.76273563",
+            ),
+            PublishTargetResult(
+                target="meta", status=PublishStatus.PENDING
+            ),
+        ),
+    )
+    save_queue(
+        RenderQueue(version=q.version, items=(updated_item,)), tmp_path
+    )
+
+    meta = MagicMock()
+    meta.upload = MagicMock(return_value="https://instagram.com/reel/abc")
+    plugins: dict[str, object] = {"meta": meta}
+
+    publish_queue_item(tmp_path, added.id, plugins, target="meta")
+
+    call_metadata = meta.upload.call_args.kwargs["metadata"]
+    # tiktok sentinel URL was NOT used as video_url
+    assert "video_url" not in call_metadata
+
+
+def test_publish_hook_only_and_failed_uploader_partial(tmp_path: Path) -> None:
+    """When a real uploader fails and the other target is hook-only (skipped), overall is FAILED."""
+    result = _render_result(tmp_path)
+    with patch("reeln.core.queue.update_queue_index"):
+        added = add_to_queue(
+            tmp_path, result, available_targets=["google", "meta"]
+        )
+
+    google = MagicMock()
+    google.upload = MagicMock(side_effect=RuntimeError("API down"))
+    meta = MagicMock(spec=["on_post_render", "name"])
+    meta.name = "meta"
+    plugins: dict[str, object] = {"google": google, "meta": meta}
+
+    published = publish_queue_item(tmp_path, added.id, plugins)
+
+    google_target = next(t for t in published.publish_targets if t.target == "google")
+    meta_target = next(t for t in published.publish_targets if t.target == "meta")
     assert google_target.status is PublishStatus.FAILED
-    assert "hook boom" in google_target.error
+    assert "API down" in google_target.error
+    assert meta_target.status is PublishStatus.SKIPPED
+    # Non-skipped set is {FAILED} → overall is FAILED.
+    assert published.status is QueueStatus.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -546,18 +960,52 @@ def test_discover_targets_mixed() -> None:
 
 
 def test_publish_all(tmp_path: Path) -> None:
-    result = _render_result(tmp_path)
+    # Use DIFFERENT output files so add_to_queue's dedup doesn't
+    # supersede the first item. Each call simulates a distinct clip.
+    result_a = _render_result(tmp_path, output_name="a.mp4")
+    result_b = _render_result(tmp_path, output_name="b.mp4")
     google = MagicMock()
     google.upload = MagicMock(return_value="https://youtu.be/1")
     plugins: dict[str, object] = {"google": google}
 
     with patch("reeln.core.queue.update_queue_index"):
-        add_to_queue(tmp_path, result, available_targets=["google"])
-        add_to_queue(tmp_path, result, available_targets=["google"])
+        add_to_queue(tmp_path, result_a, available_targets=["google"])
+        add_to_queue(tmp_path, result_b, available_targets=["google"])
 
     published = publish_all(tmp_path, plugins)
     assert len(published) == 2
     assert all(p.status is QueueStatus.PUBLISHED for p in published)
+
+
+def test_publish_all_same_file_dedup_prevents_duplicate_uploads(
+    tmp_path: Path,
+) -> None:
+    """REGRESSION: publish_all must not upload the same file twice when
+    the user re-renders the same clip (which accumulates queue items
+    pointing at the same output path). add_to_queue soft-deletes the
+    prior unpublished item, so publish_all only sees one RENDERED item.
+
+    This is the root cause of the "Ben Remitz goal uploaded to IG
+    three times" production incident.
+    """
+    # Same file, called three times (simulating the user rendering the
+    # same clip three times to tweak titles/overlays).
+    result = _render_result(tmp_path)
+    google = MagicMock()
+    google.upload = MagicMock(return_value="https://youtu.be/unique")
+    plugins: dict[str, object] = {"google": google}
+
+    with patch("reeln.core.queue.update_queue_index"):
+        add_to_queue(tmp_path, result, available_targets=["google"])
+        add_to_queue(tmp_path, result, available_targets=["google"])
+        add_to_queue(tmp_path, result, available_targets=["google"])
+
+    published = publish_all(tmp_path, plugins)
+
+    # Only ONE publish — not three.
+    assert len(published) == 1
+    assert google.upload.call_count == 1
+    assert published[0].status is QueueStatus.PUBLISHED
 
 
 def test_publish_all_empty(tmp_path: Path) -> None:
@@ -697,13 +1145,24 @@ def test_publish_with_game_context(tmp_path: Path) -> None:
             plugin_inputs={"thumb": "/tmp/t.png"},
         )
 
-    # Use hook-based plugin to exercise the POST_RENDER path with full context
-    google = MagicMock(spec=["on_post_render", "name"])
+    # Use an Uploader-protocol plugin so the full metadata round-trip is
+    # exercised through the real publish path (manual publish only goes
+    # through upload() now).
+    google = MagicMock()
     google.name = "google"
+    google.upload = MagicMock(return_value="https://youtu.be/context")
     plugins: dict[str, object] = {"google": google}
 
     published = publish_queue_item(tmp_path, added.id, plugins)
     assert published.status is QueueStatus.PUBLISHED
+    # Confirm the metadata dict reached the plugin with the expected keys
+    # from the reconstructed game context.
+    google.upload.assert_called_once()
+    call_metadata = google.upload.call_args.kwargs["metadata"]
+    assert call_metadata["player"] == "John"
+    assert call_metadata["assists"] == "Jane"
+    assert call_metadata["event_id"] == "evt_001"
+    assert call_metadata["plugin_inputs"] == {"thumb": "/tmp/t.png"}
 
 
 def test_find_target_idx_empty_list() -> None:
