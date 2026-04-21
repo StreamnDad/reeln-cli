@@ -189,6 +189,85 @@ def test_load_team_profile_level_fallback(tmp_path: Path) -> None:
     assert loaded.level == "bantam"
 
 
+def test_load_team_profile_hyphen_slug_falls_back_to_underscore(
+    tmp_path: Path,
+) -> None:
+    """REGRESSION: games written by an older dock build used
+    hyphen-separator slugs (``machine-orange``) while team profiles
+    are stored with underscore separators (``machine_orange.json``).
+    The loader must transparently fall back to the underscore variant
+    so old games don't break after the slug-convention fix.
+    """
+    level_dir = tmp_path / "teams" / "2014"
+    level_dir.mkdir(parents=True)
+    data = {"team_name": "Machine Orange", "short_name": "MO"}
+    # Profile saved with underscore (canonical).
+    (level_dir / "machine_orange.json").write_text(
+        json.dumps(data), encoding="utf-8"
+    )
+
+    with patch("reeln.core.teams._config_base_dir", return_value=tmp_path):
+        # Old game state passes a hyphen slug — must still resolve.
+        loaded = load_team_profile("2014", "machine-orange")
+
+    assert loaded.team_name == "Machine Orange"
+
+
+def test_load_team_profile_underscore_slug_falls_back_to_hyphen(
+    tmp_path: Path,
+) -> None:
+    """Symmetric fallback: if someone manually stored a profile with
+    hyphens, a canonical underscore lookup still finds it."""
+    level_dir = tmp_path / "teams" / "2014"
+    level_dir.mkdir(parents=True)
+    data = {"team_name": "Machine Orange", "short_name": "MO"}
+    (level_dir / "machine-orange.json").write_text(
+        json.dumps(data), encoding="utf-8"
+    )
+
+    with patch("reeln.core.teams._config_base_dir", return_value=tmp_path):
+        loaded = load_team_profile("2014", "machine_orange")
+
+    assert loaded.team_name == "Machine Orange"
+
+
+def test_load_team_profile_exact_match_preferred_over_swap(
+    tmp_path: Path,
+) -> None:
+    """If BOTH variants exist on disk, the exact match wins. This
+    guards against accidentally loading a wrong profile when two
+    teams happen to differ only in their separator character."""
+    level_dir = tmp_path / "teams" / "bantam"
+    level_dir.mkdir(parents=True)
+    (level_dir / "machine_orange.json").write_text(
+        json.dumps({"team_name": "Underscore Version", "short_name": "U"}),
+        encoding="utf-8",
+    )
+    (level_dir / "machine-orange.json").write_text(
+        json.dumps({"team_name": "Hyphen Version", "short_name": "H"}),
+        encoding="utf-8",
+    )
+
+    with patch("reeln.core.teams._config_base_dir", return_value=tmp_path):
+        under = load_team_profile("bantam", "machine_orange")
+        hyphen = load_team_profile("bantam", "machine-orange")
+
+    assert under.team_name == "Underscore Version"
+    assert hyphen.team_name == "Hyphen Version"
+
+
+def test_load_team_profile_no_separator_no_fallback(
+    tmp_path: Path,
+) -> None:
+    """A slug with no hyphen or underscore has no variant to try —
+    must fail with the normal 'not found' error."""
+    with (
+        patch("reeln.core.teams._config_base_dir", return_value=tmp_path),
+        pytest.raises(ConfigError, match="not found"),
+    ):
+        load_team_profile("bantam", "nonexistent")
+
+
 # ---------------------------------------------------------------------------
 # list_team_profiles
 # ---------------------------------------------------------------------------
@@ -487,3 +566,72 @@ def test_resolve_scoring_team_empty_defaults_home() -> None:
     name, slug, _level = resolve_scoring_team("", gi)
     assert name == "Eagles"
     assert slug == "eagles"
+
+
+# ---------------------------------------------------------------------------
+# team_hint — authoritative dock tagging
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_scoring_team_hint_away_wins_over_generic_event_type() -> None:
+    """REGRESSION: when the dock stores ``event_type='goal'`` with
+    ``metadata['team']='away'``, the team_hint must win and resolve to
+    the away team. Without this, every dock-rendered away goal was
+    rendering with home team player names and logo.
+    """
+    gi = _game_info_with_teams()
+    name, slug, _level = resolve_scoring_team("goal", gi, team_hint="away")
+    assert name == "Bears"
+    assert slug == "bears"
+
+
+def test_resolve_scoring_team_hint_home_wins_over_generic_event_type() -> None:
+    gi = _game_info_with_teams()
+    name, slug, _level = resolve_scoring_team("goal", gi, team_hint="home")
+    assert name == "Eagles"
+    assert slug == "eagles"
+
+
+def test_resolve_scoring_team_hint_away_uppercase() -> None:
+    """team_hint comparison is case-insensitive."""
+    gi = _game_info_with_teams()
+    name, _slug, _level = resolve_scoring_team("goal", gi, team_hint="AWAY")
+    assert name == "Bears"
+
+
+def test_resolve_scoring_team_hint_overrides_conflicting_event_type_prefix() -> None:
+    """Explicit hint beats the event_type prefix even when they conflict.
+
+    Rationale: the metadata["team"] field is the user's explicit tag in
+    the dock; the event_type prefix is legacy CLI convention. When a
+    hint is present, trust it.
+    """
+    gi = _game_info_with_teams()
+    # event_type says HOME_* but hint says away — hint wins.
+    name, _slug, _level = resolve_scoring_team(
+        "HOME_GOAL", gi, team_hint="away"
+    )
+    assert name == "Bears"
+
+
+def test_resolve_scoring_team_unknown_hint_falls_back_to_prefix() -> None:
+    """An unrecognized hint value (neither 'home' nor 'away') falls back
+    to event_type prefix matching rather than silently failing."""
+    gi = _game_info_with_teams()
+    name, _slug, _level = resolve_scoring_team(
+        "AWAY_GOAL", gi, team_hint="neutral"
+    )
+    # Prefix matching wins since hint is unrecognized.
+    assert name == "Bears"
+
+
+def test_resolve_scoring_team_none_hint_falls_back_to_prefix() -> None:
+    """No hint at all — behaves as before the fix."""
+    gi = _game_info_with_teams()
+    name, _slug, _level = resolve_scoring_team(
+        "AWAY_GOAL", gi, team_hint=None
+    )
+    assert name == "Bears"
+
+    name, _slug, _level = resolve_scoring_team("goal", gi, team_hint=None)
+    assert name == "Eagles"  # legacy default

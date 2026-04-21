@@ -35,15 +35,43 @@ def _teams_base_dir() -> Path:
 def load_team_profile(level: str, slug: str) -> TeamProfile:
     """Load a team profile from disk.
 
-    Raises ``ConfigError`` if the file is missing or contains invalid JSON.
+    Tries the exact ``slug`` first, then falls back to swapping hyphen
+    and underscore separators. This makes the loader tolerant of stale
+    game state files whose ``home_slug``/``away_slug`` were written by
+    an older dock build that used a different slugify convention
+    (``machine-orange`` vs ``machine_orange``). Without this fallback,
+    re-rendering a game created before the slug-convention fix would
+    fail with ``Team profile not found`` even though the profile
+    exists on disk under a slightly different filename.
+
+    Raises ``ConfigError`` if no variant resolves or the file is
+    malformed.
     """
-    path = _teams_base_dir() / level / f"{slug}.json"
-    if not path.is_file():
+    base_dir = _teams_base_dir() / level
+    candidates = [slug]
+
+    # Hyphen ↔ underscore variant. Both directions because old dock
+    # builds wrote hyphens but profiles are stored with underscores.
+    swapped = slug.replace("-", "_") if "-" in slug else slug.replace("_", "-")
+    if swapped != slug:
+        candidates.append(swapped)
+
+    path: Path | None = None
+    for candidate in candidates:
+        candidate_path = base_dir / f"{candidate}.json"
+        if candidate_path.is_file():
+            path = candidate_path
+            break
+
+    if path is None:
         raise ConfigError(f"Team profile not found: {level}/{slug}")
+
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        raise ConfigError(f"Failed to read team profile {level}/{slug}: {exc}") from exc
+        raise ConfigError(
+            f"Failed to read team profile {level}/{slug}: {exc}"
+        ) from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"Team profile must be a JSON object: {level}/{slug}")
     return dict_to_team_profile(raw, level=level)
@@ -181,14 +209,37 @@ def lookup_players(
 def resolve_scoring_team(
     event_type: str,
     game_info: GameInfo,
+    *,
+    team_hint: str | None = None,
 ) -> tuple[str, str, str]:
     """Determine which team scored from the event type.
 
     Returns ``(team_name, team_slug, level)`` for the scoring team.
-    Uses prefix matching: ``home_*``/``HOME_*`` → home team,
-    ``away_*``/``AWAY_*`` → away team.
-    Defaults to home team when event type doesn't match either pattern.
+
+    Resolution priority (highest wins):
+
+    1. ``team_hint`` — an explicit ``"home"`` or ``"away"`` marker,
+       typically sourced from the GameEvent's ``metadata["team"]`` field.
+       This is the canonical way the reeln-dock stores team info
+       because it tags events with a generic ``event_type="goal"``
+       and the team-scoped metadata separately.
+    2. ``event_type`` prefix — ``home_*``/``HOME_*`` → home team,
+       ``away_*``/``AWAY_*`` → away team. Legacy CLI behavior.
+    3. Default — home team.
+
+    A previous version of this function only checked the ``event_type``
+    prefix, which defaulted every dock-rendered event to the home team
+    (rendering away-team goals with home-team player names / logos).
+    See the ``team_hint`` parameter for the fix.
     """
+    if team_hint is not None:
+        hint_lower = team_hint.lower()
+        if hint_lower == "away":
+            return (game_info.away_team, game_info.away_slug, game_info.level)
+        if hint_lower == "home":
+            return (game_info.home_team, game_info.home_slug, game_info.level)
+        # Unknown hint value — fall through to event_type prefix matching.
+
     lower = event_type.lower()
     if lower.startswith("away_"):
         return (game_info.away_team, game_info.away_slug, game_info.level)

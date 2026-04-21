@@ -138,11 +138,46 @@ def test_media_prune_error_exits(tmp_path: Path) -> None:
     assert "something went wrong" in result.output
 
 
+def test_media_prune_force_flag(tmp_path: Path) -> None:
+    result_obj = PruneResult(removed_paths=[tmp_path / "clip.mkv"], bytes_freed=50)
+    messages = ["Removed 1 file(s), 50 B"]
+    with (
+        patch("reeln.commands.media.load_config", return_value=_mock_load_config()),
+        patch(
+            "reeln.core.prune.prune_all",
+            return_value=(result_obj, messages),
+        ) as mock_pa,
+    ):
+        result = runner.invoke(app, ["media", "prune", "--force", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_pa.call_args.kwargs
+    assert call_kwargs["force"] is True
+
+
+def test_media_prune_force_short_flag(tmp_path: Path) -> None:
+    result_obj = PruneResult()
+    messages = ["Nothing to prune"]
+    with (
+        patch("reeln.commands.media.load_config", return_value=_mock_load_config()),
+        patch(
+            "reeln.core.prune.prune_all",
+            return_value=(result_obj, messages),
+        ) as mock_pa,
+    ):
+        result = runner.invoke(app, ["media", "prune", "-f", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_pa.call_args.kwargs
+    assert call_kwargs["force"] is True
+
+
 def test_media_prune_help_shows_options() -> None:
     result = runner.invoke(app, ["media", "prune", "--help"])
     assert result.exit_code == 0
     assert "--output-dir" in result.output
     assert "--all" in result.output
+    assert "--force" in result.output
     assert "--dry-run" in result.output
     assert "--profile" in result.output
     assert "--config" in result.output

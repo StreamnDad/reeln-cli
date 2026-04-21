@@ -156,7 +156,22 @@ def add_to_queue(
     available_targets: list[str] | None = None,
     config_profile: str = "",
 ) -> QueueItem:
-    """Create a queue item from a render result and save to disk."""
+    """Create a queue item from a render result and save to disk.
+
+    Soft-deletes any prior unpublished queue items that point at the same
+    output file path. Rationale: when the user re-renders the same clip
+    (to tweak the render profile, player overlay, or just regenerate the
+    openai-generated title), the new render overwrites the previous
+    ``.mp4`` on disk — so any prior queue item pointing at that file is
+    stale. Leaving stale items in the queue causes ``reeln queue
+    publish-all`` to upload the same file multiple times, producing
+    duplicate IG Reels / YouTube videos / TikTok posts.
+
+    Already-published items are never soft-deleted; they remain as a
+    historical record of what was uploaded (their ``publish_targets``
+    carry real URLs). ``publish_all`` already filters on status
+    ``RENDERED`` so published items won't be re-processed.
+    """
     title = generate_title(game_info, game_event, player, assists)
     description = generate_description(game_info, game_event, player, assists)
 
@@ -193,7 +208,32 @@ def add_to_queue(
     )
 
     queue = load_queue(game_dir)
-    queue = RenderQueue(version=queue.version, items=(*queue.items, item))
+
+    # Soft-delete stale prior items pointing at the same output file.
+    # See the docstring for the rationale. We normalize both paths through
+    # Path() so "/foo/bar.mp4" and "/foo/./bar.mp4" compare equal.
+    new_output = Path(item.output)
+    merged_items: list[QueueItem] = []
+    superseded: list[str] = []
+    for existing in queue.items:
+        if existing.status not in (
+            QueueStatus.REMOVED,
+            QueueStatus.PUBLISHED,
+        ) and Path(existing.output) == new_output:
+            existing = replace(existing, status=QueueStatus.REMOVED)
+            superseded.append(existing.id)
+        merged_items.append(existing)
+    merged_items.append(item)
+
+    if superseded:
+        log.info(
+            "Superseded %d stale queue item(s) for %s: %s",
+            len(superseded),
+            new_output.name,
+            ", ".join(superseded),
+        )
+
+    queue = RenderQueue(version=queue.version, items=tuple(merged_items))
     save_queue(queue, game_dir)
     update_queue_index(game_dir)
 
@@ -307,14 +347,18 @@ def publish_queue_item(
     When *target* is ``None``, publishes to all pending targets.
     When *target* is a string, publishes to that single target.
 
-    Supports two plugin patterns:
-    - **Uploader protocol**: plugins with an ``upload()`` method are called directly
-    - **POST_RENDER hook**: plugins with ``on_post_render()`` are triggered via
-      ``POST_RENDER`` hook emission (existing plugin pattern)
+    Manual publish goes through the :class:`~reeln.plugins.capabilities.Uploader`
+    protocol only — plugins must implement an ``upload()`` method that returns
+    the public URL on success, raises
+    :class:`~reeln.plugins.capabilities.UploaderSkipped` for an intentional
+    skip, or raises any other ``Exception`` for a failure. Plugins that only
+    implement ``on_post_render`` still run during the render fast-track
+    (``reeln render`` without ``--queue``); for manual publish they are
+    marked ``PublishStatus.SKIPPED`` with an explanatory message so the user
+    can tell the difference between "uploaded", "failed", and "not wired".
     """
     from reeln.core.throttle import upload_lock
-    from reeln.models.render_plan import RenderPlan
-    from reeln.models.render_plan import RenderResult as _RR
+    from reeln.plugins.capabilities import UploaderSkipped
     from reeln.plugins.hooks import Hook, HookContext
     from reeln.plugins.registry import get_registry
 
@@ -328,7 +372,11 @@ def publish_queue_item(
     if not output_path.is_file():
         raise QueueError(f"Output file not found: {item.output}")
 
-    # Build metadata for uploaders
+    # Build metadata for uploaders. In addition to the game-context fields
+    # from build_publish_metadata, include render-specific fields from the
+    # QueueItem so uploaders that need to distinguish Shorts from Videos
+    # (google, tiktok) can detect portrait vs landscape without access to
+    # the original render plan.
     game_info = _reconstruct_game_info(item)
     game_event = _reconstruct_game_event(item)
     metadata = build_publish_metadata(
@@ -340,6 +388,33 @@ def publish_queue_item(
         assists=item.assists,
         plugin_inputs=item.plugin_inputs or None,
     )
+    if item.format:
+        metadata["format"] = item.format
+    if item.render_profile:
+        metadata["render_profile"] = item.render_profile
+    if item.duration_seconds is not None:
+        metadata["duration_seconds"] = item.duration_seconds
+
+    # Seed metadata["video_url"] from any previously-published target that
+    # already carries a hosted-file URL. This makes per-target retry
+    # idempotent: when the user clicks "Retry" on meta alone, cloudflare
+    # isn't re-invoked in this publish call — but its URL is still in
+    # item.publish_targets from the previous call, so meta's upload()
+    # can consume it via PULL_FROM_URL semantics.
+    #
+    # Only http(s) URLs are accepted. Non-HTTP sentinels like
+    # ``tiktok:v_inbox_url~...`` are publication identifiers, not raw
+    # media URLs, and would cause downstream plugins (meta, tiktok pull)
+    # to fail if used as a source.
+    for ptr in sorted(item.publish_targets, key=lambda t: t.target):
+        if (
+            ptr.status is PublishStatus.PUBLISHED
+            and ptr.url
+            and (ptr.url.startswith("http://") or ptr.url.startswith("https://"))
+            and "video_url" not in metadata
+        ):
+            metadata["video_url"] = ptr.url
+            break
 
     # Determine which targets to publish to
     targets_to_publish: list[str] = []
@@ -375,7 +450,16 @@ def publish_queue_item(
 
     updated_targets = list(item.publish_targets)
 
-    # Publish via Uploader protocol (direct call per target)
+    # Publish via Uploader protocol (direct call per target).
+    # UploaderSkipped is caught BEFORE the generic Exception clause so it
+    # maps to PublishStatus.SKIPPED (intentional skip) instead of FAILED.
+    #
+    # Alphabetical ordering in targets_to_publish means cloudflare (which
+    # hosts raw media files on R2) runs before meta (which publishes Reels
+    # from a hosted URL) and tiktok (which can use PULL_FROM_URL). The
+    # first uploader's returned URL is threaded into metadata["video_url"]
+    # so downstream plugins can consume it; subsequent plugins do NOT
+    # overwrite it, preserving the raw-hosted-file URL.
     for target_name in uploader_targets:
         plugin = plugins[target_name]
         target_idx = _find_target_idx(updated_targets, target_name)
@@ -390,75 +474,61 @@ def publish_queue_item(
                 published_at=_now_iso(),
             )
             log.info("Published %s to %s: %s", item.id, target_name, url)
+            # First uploader to return a URL establishes video_url for
+            # downstream plugins. Don't overwrite — later plugins produce
+            # publication URLs (YouTube, Reels) that aren't ingestible as
+            # raw media sources.
+            if url and "video_url" not in metadata:
+                metadata = {**metadata, "video_url": url}
+        except UploaderSkipped as exc:
+            result_ptr = PublishTargetResult(
+                target=target_name,
+                status=PublishStatus.SKIPPED,
+                error=str(exc),
+            )
+            log.info("Skipped %s for %s: %s", target_name, item.id, exc)
         except Exception as exc:
             result_ptr = PublishTargetResult(
                 target=target_name,
                 status=PublishStatus.FAILED,
                 error=str(exc),
             )
-            log.warning("Failed to publish %s to %s: %s", item.id, target_name, exc)
+            log.warning(
+                "Failed to publish %s to %s: %s", item.id, target_name, exc
+            )
 
         if target_idx is not None:
             updated_targets[target_idx] = result_ptr
         else:
             updated_targets.append(result_ptr)
 
-    # Publish via POST_RENDER hook (broadcast to all registered handlers)
+    # Plugins without upload() are marked SKIPPED for manual publish.
+    # They still run via POST_RENDER during `reeln render` (fast-track path);
+    # manual publish requires opt-in via the Uploader protocol. Previously
+    # this branch emitted POST_RENDER and unconditionally marked every hook
+    # target as PUBLISHED, which lied to the user when plugins silently
+    # early-returned in their on_post_render guards.
     if hook_targets:
-        post_render_result = _RR(
-            output=output_path,
-            duration_seconds=item.duration_seconds,
-            file_size_bytes=item.file_size_bytes,
+        skip_reason = (
+            "Plugin does not support manual publish (no upload() method). "
+            "It runs via POST_RENDER during `reeln render`."
         )
-        post_render_plan = RenderPlan(inputs=[output_path], output=output_path)
-        hook_data: dict[str, Any] = {
-            "plan": post_render_plan,
-            "result": post_render_result,
-        }
-        if game_info is not None:
-            hook_data["game_info"] = game_info
-        if game_event is not None:
-            hook_data["game_event"] = game_event
-        if item.player:
-            hook_data["player"] = item.player
-        if item.assists:
-            hook_data["assists"] = item.assists
-        if item.plugin_inputs:
-            hook_data["plugin_inputs"] = item.plugin_inputs
-        # Include publish metadata so plugins can use edited title/description
-        hook_data["publish_metadata"] = metadata
-
-        try:
-            get_registry().emit(
-                Hook.POST_RENDER,
-                HookContext(hook=Hook.POST_RENDER, data=hook_data),
+        for target_name in hook_targets:
+            target_idx = _find_target_idx(updated_targets, target_name)
+            result_ptr = PublishTargetResult(
+                target=target_name,
+                status=PublishStatus.SKIPPED,
+                error=skip_reason,
             )
-            now = _now_iso()
-            for target_name in hook_targets:
-                target_idx = _find_target_idx(updated_targets, target_name)
-                result_ptr = PublishTargetResult(
-                    target=target_name,
-                    status=PublishStatus.PUBLISHED,
-                    published_at=now,
-                )
-                if target_idx is not None:
-                    updated_targets[target_idx] = result_ptr
-                else:
-                    updated_targets.append(result_ptr)
-            log.info("Published %s via POST_RENDER to %s", item.id, hook_targets)
-        except Exception as exc:
-            for target_name in hook_targets:
-                target_idx = _find_target_idx(updated_targets, target_name)
-                result_ptr = PublishTargetResult(
-                    target=target_name,
-                    status=PublishStatus.FAILED,
-                    error=str(exc),
-                )
-                if target_idx is not None:
-                    updated_targets[target_idx] = result_ptr
-                else:
-                    updated_targets.append(result_ptr)
-            log.warning("POST_RENDER publish failed for %s: %s", item.id, exc)
+            if target_idx is not None:
+                updated_targets[target_idx] = result_ptr
+            else:
+                updated_targets.append(result_ptr)
+        log.info(
+            "Skipped manual publish for hook-only targets %s on %s",
+            hook_targets,
+            item.id,
+        )
 
     # Emit ON_PUBLISH for tracking
     for target_name in targets_to_publish:
@@ -481,14 +551,23 @@ def publish_queue_item(
                 ),
             )
 
-    # Determine overall status
+    # Determine overall status. SKIPPED targets are excluded from the
+    # decision — they represent plugins that were intentionally not
+    # published (disabled in config, or not wired for manual publish yet),
+    # not failures. When every target is skipped, the item stays in
+    # RENDERED so the user can re-publish later once more plugins are
+    # wired. When at least one non-skipped target published successfully,
+    # SKIPPED targets don't drag the overall to PARTIAL.
     all_statuses = {t.status for t in updated_targets}
-    if all(s is PublishStatus.PUBLISHED for s in all_statuses):
+    non_skipped = {s for s in all_statuses if s is not PublishStatus.SKIPPED}
+    if not non_skipped:
+        overall = QueueStatus.RENDERED
+    elif non_skipped == {PublishStatus.PUBLISHED}:
         overall = QueueStatus.PUBLISHED
-    elif PublishStatus.PUBLISHED in all_statuses:
-        overall = QueueStatus.PARTIAL
-    elif all(s is PublishStatus.FAILED for s in all_statuses):
+    elif non_skipped == {PublishStatus.FAILED}:
         overall = QueueStatus.FAILED
+    elif PublishStatus.PUBLISHED in non_skipped:
+        overall = QueueStatus.PARTIAL
     else:
         overall = QueueStatus.PARTIAL
 

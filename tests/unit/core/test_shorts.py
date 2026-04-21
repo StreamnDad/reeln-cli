@@ -948,7 +948,7 @@ def test_build_speed_segments_filters_two_segments() -> None:
     # Audio: asplit, atrim segments, concat
     assert "[_asrc]asplit=2[a0][a1]" in audio
     assert "[a0]atrim=0.0:5.0,asetpts=PTS-STARTPTS[sa0]" in audio
-    assert "[a1]atrim=5.0,asetpts=PTS-STARTPTS,atempo=0.5[sa1]" in audio
+    assert "[a1]atrim=5.0,asetpts=PTS-STARTPTS,atempo=0.5,volume=0[sa1]" in audio
     assert "[sa0][sa1]concat=n=2:v=0:a=1[_aout]" in audio
 
 
@@ -975,16 +975,17 @@ def test_build_speed_segments_filters_speed_1_no_extra_setpts() -> None:
     # v0 (speed=1.0) should NOT have setpts=PTS/1.0
     v0_part = video.split(";")[1]  # [v0]trim=...
     assert "setpts=PTS/1.0" not in v0_part
-    # a0 (speed=1.0) should NOT have atempo
+    # a0 (speed=1.0) should NOT have atempo or volume=0
     a0_part = audio.split(";")[1]
     assert "atempo" not in a0_part
+    assert "volume=0" not in a0_part
 
 
 def test_build_speed_segments_filters_very_slow_speed() -> None:
-    """Speed < 0.5 uses chained atempo."""
+    """Speed < 0.5 uses chained atempo and mutes."""
     segs = (SpeedSegment(speed=0.25, until=5.0), SpeedSegment(speed=1.0))
     _, audio = build_speed_segments_filters(segs)
-    assert "atempo=0.5,atempo=0.5" in audio
+    assert "atempo=0.5,atempo=0.5,volume=0" in audio
 
 
 # ---------------------------------------------------------------------------

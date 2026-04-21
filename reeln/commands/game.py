@@ -561,6 +561,7 @@ def finish(
 def prune(
     output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
     all_files: bool = typer.Option(False, "--all", help="Also remove raw event clips."),
+    force: bool = typer.Option(False, "--force", "-f", help="Remove untagged event clips."),
     profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
     config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed."),
@@ -577,7 +578,7 @@ def prune(
     game_dir = _resolve_game_dir(output_dir, config.paths.output_dir)
 
     try:
-        _, messages = prune_game(game_dir, all_files=all_files, dry_run=dry_run)
+        _, messages = prune_game(game_dir, all_files=all_files, force=force, dry_run=dry_run)
     except ReelnError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc

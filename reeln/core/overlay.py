@@ -120,7 +120,7 @@ def build_overlay_context(
         scorer_text, base=scorer_base, min_size=scorer_min, max_chars=scorer_max_chars,
     ))
     goal_assist_fs = str(overlay_font_size(
-        f"{assist_1} {assist_2}".strip(), base=20, min_size=16, max_chars=assist_max_chars,
+        f"{assist_1} {assist_2}".strip(), base=32, min_size=24, max_chars=assist_max_chars,
     ))
 
     # Colors

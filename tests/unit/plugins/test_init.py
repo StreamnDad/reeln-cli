@@ -33,6 +33,11 @@ def test_exports_uploader() -> None:
     assert hasattr(plugins, "Uploader")
 
 
+def test_exports_uploader_skipped() -> None:
+    assert hasattr(plugins, "UploaderSkipped")
+    assert issubclass(plugins.UploaderSkipped, Exception)
+
+
 def test_exports_metadata_enricher() -> None:
     assert hasattr(plugins, "MetadataEnricher")
 
@@ -67,6 +72,7 @@ def test_all_matches_expected() -> None:
         "PluginAuthReport",
         "PluginInputSchema",
         "Uploader",
+        "UploaderSkipped",
         "activate_plugins",
         "get_input_collector",
         "get_registry",

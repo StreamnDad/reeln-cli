@@ -9,6 +9,16 @@ from reeln.models.auth import AuthCheckResult
 from reeln.models.plugin import GeneratorResult
 
 
+class UploaderSkipped(Exception):
+    """Raised by ``Uploader.upload()`` to signal an intentional skip.
+
+    Distinct from a generic failure — the publish orchestration layer
+    treats this as ``PublishStatus.SKIPPED`` rather than ``FAILED``.
+    The exception message should carry a human-readable reason
+    (e.g. "upload_video disabled in plugin config").
+    """
+
+
 class Uploader(Protocol):
     """Protocol for plugins that upload rendered media to external services."""
 

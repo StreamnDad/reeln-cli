@@ -1708,11 +1708,48 @@ def test_game_prune_config_error_exits() -> None:
     assert "bad config" in result.output
 
 
+def test_game_prune_force_flag(tmp_path: Path) -> None:
+    (tmp_path / "game.json").write_text("{}")
+    result_obj = PruneResult(removed_paths=[tmp_path / "clip.mkv"], bytes_freed=50)
+    messages = ["Removed 1 file(s), 50 B"]
+    with (
+        patch("reeln.commands.game.load_config", return_value=_mock_load_config()),
+        patch(
+            "reeln.core.prune.prune_game",
+            return_value=(result_obj, messages),
+        ) as mock_pg,
+    ):
+        result = runner.invoke(app, ["game", "prune", "--force", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_pg.call_args.kwargs
+    assert call_kwargs["force"] is True
+
+
+def test_game_prune_force_short_flag(tmp_path: Path) -> None:
+    (tmp_path / "game.json").write_text("{}")
+    result_obj = PruneResult()
+    messages = ["Nothing to prune"]
+    with (
+        patch("reeln.commands.game.load_config", return_value=_mock_load_config()),
+        patch(
+            "reeln.core.prune.prune_game",
+            return_value=(result_obj, messages),
+        ) as mock_pg,
+    ):
+        result = runner.invoke(app, ["game", "prune", "-f", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0
+    call_kwargs = mock_pg.call_args.kwargs
+    assert call_kwargs["force"] is True
+
+
 def test_game_prune_help_shows_options() -> None:
     result = runner.invoke(app, ["game", "prune", "--help"])
     assert result.exit_code == 0
     assert "--output-dir" in result.output
     assert "--all" in result.output
+    assert "--force" in result.output
     assert "--dry-run" in result.output
     assert "--profile" in result.output
     assert "--config" in result.output

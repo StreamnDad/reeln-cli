@@ -279,6 +279,7 @@ def build_speed_segments_filters(
         chain = [atrim, "asetpts=PTS-STARTPTS"]
         if seg.speed != 1.0:
             chain.append(_build_atempo_chain(seg.speed))
+            chain.append("volume=0")
         audio_parts.append(f"{a_labels[i]}{','.join(chain)}{sa_labels[i]}")
 
     audio_parts.append(f"{''.join(sa_labels)}concat=n={n}:v=0:a=1[_aout]")
