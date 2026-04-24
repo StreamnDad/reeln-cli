@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 import typer
@@ -28,7 +29,7 @@ def _interactive() -> bool:
     return sys.stdin.isatty()
 
 
-def _require_questionary():
+def _require_questionary() -> types.ModuleType:
     """Lazy-import questionary with a helpful error if missing."""
     if not _interactive():
         msg = (
