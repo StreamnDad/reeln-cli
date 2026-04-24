@@ -490,6 +490,40 @@ def test_build_plugin_status_no_update_when_same_version() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_find_uv_via_which() -> None:
+    from reeln.core.plugin_registry import _find_uv
+
+    with patch("reeln.core.plugin_registry.shutil.which", return_value="/usr/bin/uv"):
+        assert _find_uv() == "/usr/bin/uv"
+
+
+def test_find_uv_fallback_path(tmp_path: Path) -> None:
+    from reeln.core.plugin_registry import _find_uv
+
+    fake_uv = tmp_path / ".local" / "bin" / "uv"
+    fake_uv.parent.mkdir(parents=True)
+    fake_uv.touch()
+
+    with (
+        patch("reeln.core.plugin_registry.shutil.which", return_value=None),
+        patch("pathlib.Path.home", return_value=tmp_path),
+    ):
+        result = _find_uv()
+    assert result is not None
+    assert result.endswith("uv")
+
+
+def test_find_uv_returns_none_when_missing(tmp_path: Path) -> None:
+    from reeln.core.plugin_registry import _find_uv
+
+    with (
+        patch("reeln.core.plugin_registry.shutil.which", return_value=None),
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("pathlib.Path.is_file", return_value=False),
+    ):
+        assert _find_uv() is None
+
+
 def test_detect_installer_uv_found() -> None:
     with patch("reeln.core.plugin_registry.shutil.which", return_value="/usr/bin/uv"):
         result = detect_installer()
