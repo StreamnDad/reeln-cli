@@ -261,6 +261,31 @@ class PipResult:
     error: str = ""
 
 
+def _find_uv() -> str | None:
+    """Find the uv binary, checking common install locations.
+
+    ``shutil.which`` may fail in GUI apps (Tauri) that don't inherit the
+    user's shell PATH.
+    """
+    found = shutil.which("uv")
+    if found:
+        return found
+
+    from pathlib import Path
+
+    home = Path.home()
+    candidates = [
+        home / ".local" / "bin" / "uv",
+        home / ".cargo" / "bin" / "uv",
+        Path("/opt/homebrew/bin/uv"),
+        Path("/usr/local/bin/uv"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return str(c)
+    return None
+
+
 def detect_installer() -> list[str]:
     """Detect the best available installer.
 
@@ -268,8 +293,9 @@ def detect_installer() -> list[str]:
     so that plugins are installed alongside reeln-cli (even when reeln is
     a uv tool and cwd contains a different ``.venv``).
     """
-    if shutil.which("uv"):
-        return ["uv", "pip", "install", "--python", sys.executable]
+    uv = _find_uv()
+    if uv:
+        return [uv, "pip", "install", "--python", sys.executable]
     return [sys.executable, "-m", "pip", "install"]
 
 
@@ -466,8 +492,9 @@ def update_all_plugins(
 
 def _detect_uninstaller() -> list[str]:
     """Detect the best available uninstaller targeting the running environment."""
-    if shutil.which("uv"):
-        return ["uv", "pip", "uninstall", "--python", sys.executable]
+    uv = _find_uv()
+    if uv:
+        return [uv, "pip", "uninstall", "--python", sys.executable]
     return [sys.executable, "-m", "pip", "uninstall", "-y"]
 
 
