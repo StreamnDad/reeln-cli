@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -14,7 +12,6 @@ from rich.table import Table
 
 from reeln.core.config import (
     config_dir,
-    config_to_dict,
     default_config,
     save_config,
 )
@@ -31,7 +28,7 @@ def _interactive() -> bool:
     return sys.stdin.isatty()
 
 
-def _require_questionary():  # noqa: ANN202
+def _require_questionary():
     """Lazy-import questionary with a helpful error if missing."""
     if not _interactive():
         msg = (
@@ -90,14 +87,14 @@ def _prompt_overwrite(path: Path) -> bool:
 
 
 def init(
-    sport: Optional[str] = typer.Option(None, "--sport", help="Sport type"),
-    source_dir: Optional[Path] = typer.Option(
+    sport: str | None = typer.Option(None, "--sport", help="Sport type"),
+    source_dir: Path | None = typer.Option(
         None, "--source-dir", help="Replay source directory"
     ),
-    output_dir: Optional[Path] = typer.Option(
+    output_dir: Path | None = typer.Option(
         None, "--output-dir", help="Game output directory"
     ),
-    config_path: Optional[Path] = typer.Option(
+    config_path: Path | None = typer.Option(
         None, "--config", help="Config file path"
     ),
     force: bool = typer.Option(
