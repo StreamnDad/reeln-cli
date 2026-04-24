@@ -493,12 +493,13 @@ def test_build_plugin_status_no_update_when_same_version() -> None:
 def test_detect_installer_uv_found() -> None:
     with patch("reeln.core.plugin_registry.shutil.which", return_value="/usr/bin/uv"):
         result = detect_installer()
-    assert result[:3] == ["uv", "pip", "install"]
+    assert result[0].endswith("uv")
+    assert result[1:3] == ["pip", "install"]
     assert "--python" in result
 
 
 def test_detect_installer_uv_not_found() -> None:
-    with patch("reeln.core.plugin_registry.shutil.which", return_value=None):
+    with patch("reeln.core.plugin_registry._find_uv", return_value=None):
         result = detect_installer()
     assert result[0].endswith("python") or "python" in result[0]
     assert result[1:] == ["-m", "pip", "install"]
@@ -506,7 +507,7 @@ def test_detect_installer_uv_not_found() -> None:
 
 def test_detect_installer_uses_sys_executable() -> None:
     with (
-        patch("reeln.core.plugin_registry.shutil.which", return_value=None),
+        patch("reeln.core.plugin_registry._find_uv", return_value=None),
         patch("reeln.core.plugin_registry.sys.executable", "/usr/bin/python3.11"),
     ):
         result = detect_installer()
@@ -1080,14 +1081,14 @@ def test_detect_uninstaller_uv() -> None:
 
     with patch("shutil.which", return_value="/usr/bin/uv"):
         cmd = _detect_uninstaller()
-    assert cmd[0] == "uv"
+    assert cmd[0].endswith("uv")
     assert "uninstall" in cmd
 
 
 def test_detect_uninstaller_pip() -> None:
     from reeln.core.plugin_registry import _detect_uninstaller
 
-    with patch("shutil.which", return_value=None):
+    with patch("reeln.core.plugin_registry._find_uv", return_value=None):
         cmd = _detect_uninstaller()
     assert "pip" in " ".join(cmd)
     assert "-y" in cmd
