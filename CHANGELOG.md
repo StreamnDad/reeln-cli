@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.39] - 2026-04-24
+
+### Added
+- `reeln init` command — guided first-time setup with interactive sport selection, directory configuration, and config creation
+- Non-interactive mode: `reeln init --sport hockey --source-dir ~/replays --output-dir ~/games`
+
+### Fixed
+- Plugin install/uninstall now finds `uv` in common paths (`~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin`) when shell PATH is minimal (fixes "No module named pip" in Tauri/GUI apps)
+
 ## [0.0.38] - 2026-04-07
 
 ### Added
