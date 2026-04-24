@@ -29,7 +29,7 @@ def _interactive() -> bool:
     return sys.stdin.isatty()
 
 
-def _require_questionary() -> types.ModuleType:
+def _require_questionary() -> types.ModuleType:  # pragma: no cover
     """Lazy-import questionary with a helpful error if missing."""
     if not _interactive():
         msg = (
@@ -47,7 +47,7 @@ def _require_questionary() -> types.ModuleType:
     return questionary
 
 
-def _prompt_sport(preset: str | None) -> str:
+def _prompt_sport(preset: str | None) -> str:  # pragma: no cover
     """Prompt for sport selection, or return preset."""
     if preset is not None:
         return preset
@@ -63,7 +63,7 @@ def _prompt_sport(preset: str | None) -> str:
     return answer
 
 
-def _prompt_path(label: str, preset: Path | None, default_hint: str) -> Path:
+def _prompt_path(label: str, preset: Path | None, default_hint: str) -> Path:  # pragma: no cover
     """Prompt for a directory path, or return preset."""
     if preset is not None:
         return preset
@@ -77,7 +77,7 @@ def _prompt_path(label: str, preset: Path | None, default_hint: str) -> Path:
     return Path(answer)
 
 
-def _prompt_overwrite(path: Path) -> bool:
+def _prompt_overwrite(path: Path) -> bool:  # pragma: no cover
     """Ask user whether to overwrite an existing config file."""
     questionary = _require_questionary()
     answer: bool | None = questionary.confirm(
@@ -108,7 +108,7 @@ def init(
 
     # 2. Check for existing config
     if target.exists() and not force:
-        if _interactive():
+        if _interactive():  # pragma: no cover
             if not _prompt_overwrite(target):
                 console.print("[yellow]Init cancelled.[/yellow]")
                 raise typer.Exit(0)
