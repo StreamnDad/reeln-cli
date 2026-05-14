@@ -29,6 +29,7 @@ secrets/
 output/
 .tmp/
 ffmpeg2pass-*
+render_queue.json
 
 # Sphinx docs build
 docs/_build/
