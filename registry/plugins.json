@@ -15,7 +15,7 @@
     {
       "name": "google",
       "package": "reeln-plugin-google",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "description": "Google platform integration — YouTube livestream creation, uploads, playlists, and comments",
       "capabilities": ["uploader", "authenticator", "hook:ON_GAME_INIT", "hook:ON_GAME_READY", "hook:ON_GAME_FINISH", "hook:ON_POST_GAME_FINISH", "hook:ON_HIGHLIGHTS_MERGED", "hook:POST_RENDER"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-google",
@@ -72,7 +72,7 @@
     {
       "name": "openai",
       "package": "reeln-plugin-openai",
-      "version": "0.10.0",
+      "version": "0.10.1",
       "description": "OpenAI-powered LLM integration — livestream metadata, render metadata, game thumbnails, and translation",
       "capabilities": ["authenticator", "hook:ON_GAME_INIT", "hook:ON_QUEUE", "hook:POST_RENDER", "hook:ON_FRAMES_EXTRACTED"],
       "homepage": "https://github.com/StreamnDad/reeln-plugin-openai",
