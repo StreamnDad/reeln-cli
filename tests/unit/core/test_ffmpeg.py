@@ -731,6 +731,36 @@ def test_build_short_command_with_filters(tmp_path: Path) -> None:
     ]
 
 
+def test_build_short_command_appends_extra_args(tmp_path: Path) -> None:
+    """Quality-pass flags from ``plan.extra_args`` must reach the ffmpeg
+    cmd. Without this the pix_fmt / tune / movflags settings would be
+    invisible at the boundary — the unit tests upstream wouldn't catch
+    a missed plumbing step at the cmd builder.
+    """
+    plan = RenderPlan(
+        inputs=[tmp_path / "clip.mkv"],
+        output=tmp_path / "out.mp4",
+        filter_complex="scale=1080:-2:flags=lanczos",
+        extra_args=[
+            "-pix_fmt",
+            "yuv420p",
+            "-tune",
+            "film",
+            "-movflags",
+            "+faststart",
+        ],
+    )
+    cmd = build_short_command(Path("/usr/bin/ffmpeg"), plan)
+    # Flags appear after the audio bitrate, before the output path.
+    out_idx = cmd.index(str(tmp_path / "out.mp4"))
+    assert "-pix_fmt" in cmd[:out_idx]
+    assert "yuv420p" in cmd[:out_idx]
+    assert "-tune" in cmd[:out_idx]
+    assert "film" in cmd[:out_idx]
+    assert "-movflags" in cmd[:out_idx]
+    assert "+faststart" in cmd[:out_idx]
+
+
 def test_build_short_command_no_audio_filter(tmp_path: Path) -> None:
     plan = RenderPlan(
         inputs=[tmp_path / "clip.mkv"],

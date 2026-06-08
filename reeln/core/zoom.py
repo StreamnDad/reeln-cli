@@ -38,6 +38,142 @@ def _downsample(
     return result
 
 
+def _smooth_moving_average(
+    values: list[tuple[float, float]],
+    window: int = 3,
+) -> list[tuple[float, float]]:
+    """Smooth value coordinates with a centered moving average.
+
+    Returns a new list with the original timestamps but averaged values.
+    Per-frame vision detectors (e.g. OpenAI ``smart_zoom``) produce one
+    independent prediction per frame; an outlier prediction can land in
+    the downsampled keyframe set and create a visible jump between
+    consecutive interpolation segments. A short moving average flattens
+    isolated spikes while leaving smooth trajectories essentially
+    unchanged.
+
+    The first and last points are anchored unchanged so the path still
+    covers the full time range exactly. Window must be odd and ≥ 3;
+    asymmetric windows are used at edges so no value is dropped.
+    """
+    n = len(values)
+    if n <= 2 or window < 3:
+        return list(values)
+
+    half = window // 2
+    result: list[tuple[float, float]] = [values[0]]
+    for i in range(1, n - 1):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        avg = sum(v for _, v in values[lo:hi]) / (hi - lo)
+        result.append((values[i][0], avg))
+    result.append(values[-1])
+    return result
+
+
+def _catmull_rom_resample(
+    values: list[tuple[float, float]],
+    num_samples: int,
+) -> list[tuple[float, float]]:
+    """Resample a path with uniform Catmull-Rom splines for smooth velocity.
+
+    Returns *num_samples* points evenly spaced in time along the smooth
+    spline through *values*. Endpoint timestamps are anchored exactly so
+    the time range matches the input.
+
+    Why this matters: linear interpolation between keyframes gives
+    continuous position but discontinuous velocity — the camera kicks
+    sideways at every keyframe. Catmull-Rom is C¹-continuous so velocity
+    transitions smoothly through every interior keyframe, which is what
+    eliminates the "choppy tracking" feel.
+
+    Boundary segments duplicate the endpoint to fabricate the missing
+    neighbour (standard "natural" Catmull-Rom). Inputs shorter than four
+    points fall back to linear interpolation — Catmull-Rom needs four
+    control points per segment.
+    """
+    n = len(values)
+    if n < 2 or num_samples < 2:
+        return list(values)
+
+    t_start = values[0][0]
+    t_end = values[-1][0]
+    if t_end <= t_start:
+        return list(values)
+
+    # Pre-sort by timestamp defensively — pathologically ordered inputs
+    # would otherwise return out-of-bounds segment indices.
+    sorted_vals = sorted(values, key=lambda p: p[0])
+    timestamps = [p[0] for p in sorted_vals]
+    samples = [p[1] for p in sorted_vals]
+
+    def _segment_value(i: int, u: float) -> float:
+        """Evaluate the Catmull-Rom segment between samples[i] and samples[i+1]."""
+        p0 = samples[i - 1] if i > 0 else samples[i]
+        p1 = samples[i]
+        p2 = samples[i + 1]
+        p3 = samples[i + 2] if i + 2 < n else samples[i + 1]
+        u2 = u * u
+        u3 = u2 * u
+        return 0.5 * (
+            2 * p1
+            + (-p0 + p2) * u
+            + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2
+            + (-p0 + 3 * p1 - 3 * p2 + p3) * u3
+        )
+
+    result: list[tuple[float, float]] = []
+    seg_idx = 0
+    for k in range(num_samples):
+        # Anchor exact endpoints to avoid floating drift on the last sample.
+        if k == 0:
+            result.append((t_start, samples[0]))
+            continue
+        if k == num_samples - 1:
+            result.append((t_end, samples[-1]))
+            continue
+        t = t_start + (t_end - t_start) * k / (num_samples - 1)
+        # Advance segment pointer to the segment containing t. Monotone
+        # walk because samples (k) move forward.
+        while seg_idx + 1 < n - 1 and timestamps[seg_idx + 1] < t:
+            seg_idx += 1
+        t0 = timestamps[seg_idx]
+        t1 = timestamps[seg_idx + 1]
+        u = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
+        # Clamp u into [0,1] in case of float wiggle near segment boundary.
+        if u < 0.0:
+            u = 0.0
+        elif u > 1.0:
+            u = 1.0
+        result.append((t, _segment_value(seg_idx, u)))
+    return result
+
+
+def _smooth_and_downsample_for_lerp(
+    values: list[tuple[float, float]],
+    max_points: int,
+) -> list[tuple[float, float]]:
+    """Pre-process a path for ``build_piecewise_lerp``.
+
+    Pipeline: window-3 moving average → Catmull-Rom resample to a dense
+    curve → evenly-spaced downsample to *max_points*. Result: the kept
+    keypoints lie on a C¹-continuous spline, so ffmpeg's linear segments
+    between them give smooth-feeling motion instead of the visible
+    velocity kicks that the previous straight downsample produced.
+
+    No-op when *values* already fits within the segment limit — explicit
+    user keyframes pass through unchanged.
+    """
+    if len(values) <= max_points:
+        return list(values)
+    smoothed = _smooth_moving_average(values, window=3)
+    # Dense enough that the downsampled 9 points land on a curve almost
+    # indistinguishable from the full spline — 5×max_points is plenty.
+    dense_count = max(max_points * 5, 30)
+    dense = _catmull_rom_resample(smoothed, dense_count)
+    return _downsample(dense, max_points)
+
+
 def build_piecewise_lerp(
     values: list[tuple[float, float]],
     total_duration: float,
@@ -61,9 +197,14 @@ def build_piecewise_lerp(
     if len(values) == 1:
         return str(values[0][1])
 
-    # Downsample to stay within ffmpeg expression parser limits.
-    # _MAX_LERP_SEGMENTS segments need _MAX_LERP_SEGMENTS + 1 points.
-    values = _downsample(values, _MAX_LERP_SEGMENTS + 1)
+    # Smooth + Catmull-Rom resample before downsampling so the kept
+    # keypoints lie on a C¹-continuous curve. Without this step the
+    # output keeps raw keyframes whose velocity at junctions changes
+    # abruptly — the "choppy tracking" feel users see at zoom_frames=16+.
+    # ``_smooth_and_downsample_for_lerp`` is a no-op when the input
+    # already fits the ffmpeg segment limit, so explicit short paths
+    # are preserved exactly.
+    values = _smooth_and_downsample_for_lerp(values, _MAX_LERP_SEGMENTS + 1)
 
     terms: list[str] = []
 

@@ -58,6 +58,7 @@ def render_iterations(
     assists: str | None = None,
     queue: bool = False,
     config_profile: str = "",
+    scoring_team_colors: list[str] | None = None,
 ) -> tuple[IterationResult, list[str]]:
     """Render *clip* through multiple profiles and concatenate the results.
 
@@ -135,6 +136,7 @@ def render_iterations(
                     duration=iter_dur,
                     event_metadata=event_metadata,
                     has_logo=short_config is not None and short_config.logo is not None,
+                    home_colors=scoring_team_colors,
                 )
 
             # Resolve subtitle template

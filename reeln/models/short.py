@@ -71,9 +71,14 @@ class ShortConfig:
     # Encoding (flows from VideoConfig)
     codec: str = "libx264"
     preset: str = "medium"
-    crf: int = 18
+    crf: int = 16
     audio_codec: str = "aac"
     audio_bitrate: str = "128k"
+    # Quality-pass additions: see VideoConfig docstrings for rationale.
+    # Empty string opts out of the corresponding flag.
+    tune: str = "film"
+    pix_fmt: str = "yuv420p"
+    movflags: str = "+faststart"
     speed_segments: tuple[SpeedSegment, ...] | None = None
     smart_zoom_frames: int = 5
     branding: Path | None = None

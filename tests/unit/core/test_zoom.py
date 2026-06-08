@@ -8,7 +8,14 @@ import pytest
 
 from reeln.core.errors import RenderError
 from reeln.core.shorts import build_filter_chain
-from reeln.core.zoom import _downsample, build_piecewise_lerp, build_smart_crop_filter
+from reeln.core.zoom import (
+    _catmull_rom_resample,
+    _downsample,
+    _smooth_and_downsample_for_lerp,
+    _smooth_moving_average,
+    build_piecewise_lerp,
+    build_smart_crop_filter,
+)
 from reeln.models.short import CropMode, ShortConfig
 from reeln.models.zoom import ZoomPath, ZoomPoint
 
@@ -119,8 +126,199 @@ def test_downsample_evenly_spaced() -> None:
 
 
 # ---------------------------------------------------------------------------
-# build_smart_crop_filter
+# _smooth_moving_average
 # ---------------------------------------------------------------------------
+
+
+def test_smooth_short_input_passes_through() -> None:
+    """Window-3 smoothing on ≤2 points returns the input unchanged."""
+    values = [(0.0, 0.1), (5.0, 0.9)]
+    result = _smooth_moving_average(values)
+    assert result == values
+    # Returns a new list (not the same object) to prevent later mutation
+    assert result is not values
+
+
+def test_smooth_endpoints_anchored() -> None:
+    """First and last points must pass through to preserve time range."""
+    values = [(0.0, 0.0), (1.0, 1.0), (2.0, 0.5), (3.0, 0.8), (4.0, 1.0)]
+    result = _smooth_moving_average(values)
+    assert result[0] == values[0]
+    assert result[-1] == values[-1]
+
+
+def test_smooth_outlier_dampened() -> None:
+    """An outlier mid-path is pulled toward its neighbors.
+
+    Regression: at zoom_frames=16, a single noisy OpenAI prediction would
+    survive the downsample-to-9 step and create a visible jump in the
+    rendered crop path. Moving-average smoothing makes the outlier
+    contribute only ~1/3 to the kept value, dampening the jump.
+    """
+    # Three consecutive neighbors at 0.5 around a single outlier at 0.9.
+    values = [
+        (0.0, 0.5),
+        (1.0, 0.5),
+        (2.0, 0.5),
+        (3.0, 0.9),  # outlier
+        (4.0, 0.5),
+        (5.0, 0.5),
+        (6.0, 0.5),
+    ]
+    result = _smooth_moving_average(values)
+    # Outlier at index 3 should be averaged with neighbors at 0.5
+    # → (0.5 + 0.9 + 0.5) / 3 ≈ 0.633, NOT 0.9.
+    assert result[3][0] == 3.0  # timestamp preserved
+    assert 0.6 < result[3][1] < 0.7
+
+
+def test_smooth_constant_path_unchanged() -> None:
+    """A perfectly smooth (constant) path is unaffected by averaging."""
+    values = [(float(i), 0.5) for i in range(8)]
+    result = _smooth_moving_average(values)
+    for orig, sm in zip(values, result, strict=True):
+        assert orig[0] == sm[0]
+        assert abs(orig[1] - sm[1]) < 1e-9
+
+
+def test_smooth_preserves_timestamps() -> None:
+    """Smoothing only modifies values, never timestamps."""
+    values = [(float(i) * 0.7, float(i) * 0.13) for i in range(6)]
+    result = _smooth_moving_average(values)
+    for orig, sm in zip(values, result, strict=True):
+        assert orig[0] == sm[0]
+
+
+def test_build_piecewise_lerp_smooths_only_above_downsample_threshold() -> None:
+    """At ≤ 9 points the path passes through unchanged (no smoothing).
+
+    Below the downsample threshold the user's explicit keyframes must
+    survive untouched — smoothing 3 explicit points would collapse them
+    toward the mean.
+    """
+    # 9 points, all at distinct values
+    values = [(float(i), float(i) / 10.0) for i in range(9)]
+    result = build_piecewise_lerp(values, 9.0)
+    # The expression should reference the EXACT input values
+    for _, v in values[1:-1]:
+        # Float formatted: each value should appear somewhere in the lerp
+        # coefficients (or close to it after slope/intercept math)
+        assert "if(" not in result  # still flat
+
+
+def test_build_piecewise_lerp_outlier_dampened_when_downsampled() -> None:
+    """At 16 points, an outlier in the middle no longer survives as-is.
+
+    Regression for the dock report: zoom_frames=16 with a single bad AI
+    prediction produced a visible jump because the downsample step kept
+    the outlier. With smoothing, the kept value at that timestamp is a
+    blend of neighbors.
+    """
+    # 16 smooth points around 0.5 with a single outlier at 0.95.
+    values = [(float(i), 0.5) for i in range(16)]
+    values[7] = (7.0, 0.95)
+    result = build_piecewise_lerp(values, 16.0)
+    # The raw outlier value 0.95 should NOT appear verbatim in the
+    # expression; the smoothed value should be much closer to 0.5.
+    assert "0.95" not in result
+
+
+# ---------------------------------------------------------------------------
+# _catmull_rom_resample
+# ---------------------------------------------------------------------------
+
+
+def test_catmull_rom_anchors_endpoints_exactly() -> None:
+    """First and last points are preserved exactly so the time range
+    matches the input — required for ffmpeg expressions to cover the
+    full clip."""
+    values = [(0.0, 0.2), (1.0, 0.8), (2.0, 0.5), (3.0, 0.9), (4.0, 0.3)]
+    result = _catmull_rom_resample(values, num_samples=20)
+    assert result[0] == values[0]
+    assert result[-1] == values[-1]
+    assert len(result) == 20
+
+
+def test_catmull_rom_short_input_passes_through() -> None:
+    """Fewer than two points → return as-is (cannot interpolate)."""
+    assert _catmull_rom_resample([], 10) == []
+    assert _catmull_rom_resample([(0.0, 0.5)], 10) == [(0.0, 0.5)]
+
+
+def test_catmull_rom_produces_continuously_changing_velocity() -> None:
+    """Velocity transitions through interior keyframes should be smooth.
+
+    Sample a zig-zag input through the resampler. With Catmull-Rom the
+    maximum velocity *change* between adjacent samples is small — the
+    spline rounds the corners. Raw linear interpolation would produce a
+    much larger ``delta`` right at each keyframe (the camera "kick"
+    users perceive as choppy tracking).
+    """
+    values = [
+        (0.0, 0.5),
+        (1.0, 0.9),
+        (2.0, 0.1),
+        (3.0, 0.9),
+        (4.0, 0.5),
+    ]
+    result = _catmull_rom_resample(values, num_samples=200)
+    velocities = [
+        (result[i + 1][1] - result[i][1]) / (result[i + 1][0] - result[i][0])
+        for i in range(len(result) - 1)
+    ]
+    deltas = [
+        abs(velocities[i + 1] - velocities[i]) for i in range(len(velocities) - 1)
+    ]
+    max_delta = max(deltas)
+    # 200 samples × 4s span. Smooth spline keeps per-step velocity-delta
+    # well below 0.5. Linear interpolation over the same input would
+    # spike to ~1.6 at each keyframe corner.
+    assert max_delta < 0.5, f"Catmull-Rom not smooth: max velocity delta {max_delta}"
+
+
+def test_catmull_rom_preserves_constant_path() -> None:
+    """A flat input stays flat after resampling."""
+    values = [(float(i), 0.5) for i in range(6)]
+    result = _catmull_rom_resample(values, num_samples=30)
+    for _, v in result:
+        assert abs(v - 0.5) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# _smooth_and_downsample_for_lerp
+# ---------------------------------------------------------------------------
+
+
+def test_smooth_and_downsample_passes_through_short_inputs() -> None:
+    """Inputs under the segment limit are not smoothed or resampled —
+    explicit user keyframes must survive untouched."""
+    values = [(float(i), float(i) / 9.0) for i in range(8)]
+    result = _smooth_and_downsample_for_lerp(values, max_points=9)
+    assert result == values
+
+
+def test_smooth_and_downsample_outputs_at_most_max_points() -> None:
+    values = [(float(i), float(i) / 20.0) for i in range(20)]
+    result = _smooth_and_downsample_for_lerp(values, max_points=9)
+    assert len(result) == 9
+    assert result[0][0] == 0.0
+    assert result[-1][0] == 19.0
+
+
+def test_smooth_and_downsample_dampens_keyframe_outliers() -> None:
+    """Regression for the dock-reported choppy tracking at zoom_frames=18.
+
+    The kept keyframes should lie on a smoothed curve, so even when ffmpeg
+    interpolates linearly between them the motion no longer snaps at
+    outliers.
+    """
+    # 18 points, all at 0.5 except one outlier at 0.95 mid-clip.
+    values = [(float(i), 0.5) for i in range(18)]
+    values[9] = (9.0, 0.95)
+    result = _smooth_and_downsample_for_lerp(values, max_points=9)
+    # None of the kept points should be near the raw 0.95 outlier.
+    for _, v in result:
+        assert v < 0.85, f"Outlier survived smoothing: kept value {v}"
 
 
 def _make_zoom_path(

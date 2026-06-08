@@ -29,6 +29,12 @@ log: logging.Logger = get_logger(__name__)
 CURRENT_CONFIG_VERSION: int = 1
 _APP_NAME: str = "reeln"
 
+# Active config path resolved by the most recent ``load_config`` call.
+# Used by ``_config_base_dir`` so that auxiliary lookups (team profiles,
+# rosters, etc.) resolve relative to an explicit ``--config`` path even
+# when the ``REELN_CONFIG`` env var is unset.
+_ACTIVE_CONFIG_PATH: Path | None = None
+
 
 # ---------------------------------------------------------------------------
 # XDG-compliant paths
@@ -72,10 +78,19 @@ def data_dir() -> Path:
 def _config_base_dir() -> Path:
     """Return the directory where config files live.
 
-    Uses the parent directory of ``REELN_CONFIG`` when set, otherwise
-    falls back to ``config_dir()``.  This ensures ``--profile`` resolves
-    relative to the active config location.
+    Resolution order:
+
+    1. Parent of the most recently loaded explicit config path (set by
+       ``load_config`` when called with ``path=`` or ``profile=``).  This
+       lets ``--config`` callers resolve auxiliary lookups (team profiles,
+       rosters) relative to the chosen config even when ``REELN_CONFIG``
+       is unset in the subprocess environment — important for GUI hosts
+       like reeln-dock that pass ``--config`` without exporting env vars.
+    2. Parent of ``REELN_CONFIG`` when set.
+    3. ``config_dir()`` default.
     """
+    if _ACTIVE_CONFIG_PATH is not None:
+        return _ACTIVE_CONFIG_PATH.expanduser().parent
     env_config = os.environ.get("REELN_CONFIG")
     if env_config:
         return Path(env_config).expanduser().parent
@@ -206,9 +221,14 @@ def _dict_to_video_config(data: dict[str, Any]) -> VideoConfig:
         ffmpeg_path=str(data.get("ffmpeg_path", "ffmpeg")),
         codec=str(data.get("codec", "libx264")),
         preset=str(data.get("preset", "medium")),
-        crf=int(data.get("crf", 18)),
+        # Default CRF lowered from 18 → 16 alongside the encoder quality
+        # pass; older config files that still set 18 are honoured as-is.
+        crf=int(data.get("crf", 16)),
         audio_codec=str(data.get("audio_codec", "aac")),
         audio_bitrate=str(data.get("audio_bitrate", "128k")),
+        tune=str(data.get("tune", "film")),
+        pix_fmt=str(data.get("pix_fmt", "yuv420p")),
+        movflags=str(data.get("movflags", "+faststart")),
     )
 
 
@@ -405,12 +425,22 @@ def validate_config(data: dict[str, Any]) -> list[str]:
             issues.append("'event_types' must be a list")
         else:
             for i, t in enumerate(event_types):
-                if not isinstance(t, str):
-                    issues.append(f"event_types[{i}] must be a string")
+                if isinstance(t, str):
+                    continue
+                if isinstance(t, dict) and isinstance(t.get("name"), str):
+                    continue
+                issues.append(
+                    f"event_types[{i}] must be a string or object with 'name'"
+                )
 
     # Cross-validate: iterations referencing types not in event_types
     if isinstance(event_types, list) and event_types:
-        type_set = {str(t) for t in event_types if isinstance(t, str)}
+        type_set: set[str] = set()
+        for t in event_types:
+            if isinstance(t, str):
+                type_set.add(t)
+            elif isinstance(t, dict) and isinstance(t.get("name"), str):
+                type_set.add(str(t["name"]))
         iter_data = data.get("iterations")
         if isinstance(iter_data, dict):
             mappings = iter_data.get("mappings", iter_data)
@@ -488,6 +518,8 @@ def load_config(
     4. ``REELN_PROFILE`` environment variable
     5. Default XDG path (``~/.config/reeln/config.json``)
     """
+    global _ACTIVE_CONFIG_PATH
+
     base = config_to_dict(default_config())
 
     # Determine whether the user explicitly requested a specific config
@@ -498,6 +530,12 @@ def load_config(
     )
 
     file_path = resolve_config_path(path, profile)
+    # Remember the resolved path so auxiliary lookups (teams, rosters)
+    # via ``_config_base_dir`` use the same directory even when no env
+    # var is exported. Only set when explicit so default-config calls
+    # don't override a previously-set explicit path.
+    if explicit:
+        _ACTIVE_CONFIG_PATH = file_path
     if file_path.is_file():
         try:
             raw = json.loads(file_path.read_text(encoding="utf-8"))

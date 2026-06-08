@@ -14,9 +14,14 @@ def test_video_config_defaults() -> None:
     assert vc.ffmpeg_path == "ffmpeg"
     assert vc.codec == "libx264"
     assert vc.preset == "medium"
-    assert vc.crf == 18
+    # Quality-pass defaults: CRF lowered 18 → 16; pix_fmt/tune/movflags
+    # baked in so every short-form render has consistent, web-safe output.
+    assert vc.crf == 16
     assert vc.audio_codec == "aac"
     assert vc.audio_bitrate == "128k"
+    assert vc.tune == "film"
+    assert vc.pix_fmt == "yuv420p"
+    assert vc.movflags == "+faststart"
 
 
 def test_video_config_custom() -> None:

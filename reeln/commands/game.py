@@ -744,3 +744,32 @@ def delete(
 
     shutil.rmtree(game_dir)
     typer.echo(f"Deleted {game_dir.name}")
+
+
+@app.command(name="set-tournament")
+def set_tournament(
+    tournament: str = typer.Argument(help="Tournament name to assign."),
+    output_dir: Path | None = typer.Option(None, "--output-dir", "-o", help="Game directory."),
+    profile: str | None = typer.Option(None, "--profile", help="Named config profile."),
+    config_path: Path | None = typer.Option(None, "--config", help="Explicit config file path."),
+) -> None:
+    """Set the tournament name for a game."""
+    try:
+        config = load_config(path=config_path, profile=profile)
+    except ReelnError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    game_dir = _resolve_game_dir(output_dir, config.paths.output_dir)
+
+    from reeln.core.highlights import load_game_state, save_game_state
+    from reeln.native import get_native, json_to_state, state_to_json
+
+    native = get_native()
+    state = load_game_state(game_dir)
+    state_json = state_to_json(state)
+    state_json = native.set_tournament(state_json, tournament)
+    state = json_to_state(state_json)  # type: ignore[assignment]
+    save_game_state(state, game_dir)
+
+    typer.echo(f"Tournament set to: {tournament}")

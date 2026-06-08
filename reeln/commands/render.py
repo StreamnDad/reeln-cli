@@ -153,6 +153,11 @@ def _record_render(
                 resolved_event_id = ev.id
                 break
 
+    import json as _json
+
+    from reeln.models.game import render_entry_to_dict
+    from reeln.native import get_native, json_to_state, state_to_json
+
     entry = RenderEntry(
         input=rel_input,
         output=rel_output,
@@ -162,7 +167,10 @@ def _record_render(
         rendered_at=datetime.now(tz=UTC).isoformat(),
         event_id=resolved_event_id,
     )
-    state.renders.append(entry)
+    native = get_native()
+    state_json = state_to_json(state)
+    state_json = native.add_render(state_json, _json.dumps(render_entry_to_dict(entry)))
+    state = json_to_state(state_json)  # type: ignore[assignment]
     save_game_state(state, game_dir)
 
 
@@ -172,13 +180,26 @@ def _resolve_player_numbers(
     game_dir: Path | None,
     config_output_dir: Path | None,
     clip: Path | None,
-) -> tuple[str, str | None, str | None, Path | None]:
-    """Resolve --player-numbers to (scorer_display, assists_csv, scoring_team_name, logo_path).
+    event_id: str | None = None,
+) -> tuple[str, str | None, str | None, Path | None, list[str]]:
+    """Resolve --player-numbers to ``(scorer, assists, team_name, logo, colors)``.
 
-    Loads game state, determines scoring team, loads roster, and looks up numbers.
-    Returns the scorer display string, a comma-separated assists string (or None),
-    the scoring team name (or None), and the team logo path (or None if not set
-    or file does not exist).
+    Loads game state, determines scoring team, loads roster, and looks up
+    numbers.  Returns the scorer display string, a comma-separated assists
+    string (or None), the scoring team name (or None), the team logo path
+    (or None if not set or the file is missing), and the scoring team's
+    color list from ``team_profile.colors`` (empty list when unset). The
+    overlay engine consumes the colors as ``home_colors``; without this
+    plumbing the overlay falls back to a flat gray which silently ignores
+    every team-color the dock saved.
+
+    When ``event_id`` is provided, the matching event's ``metadata['team']``
+    field is used as the ``team_hint`` for scoring-team resolution. This is
+    the canonical path for reeln-dock invocations, which tag events with a
+    generic ``event_type='goal'`` and record the scoring side in metadata;
+    without this hint, the resolver falls back to the event-type prefix
+    (which lacks the ``home_``/``away_`` prefix for dock-tagged events)
+    and ends up loading the home-team roster for every event.
     """
     from reeln.core.highlights import load_game_state
     from reeln.core.teams import load_roster, load_team_profile, lookup_players, resolve_scoring_team
@@ -207,8 +228,18 @@ def _resolve_player_numbers(
         )
         raise typer.Exit(code=1)
 
-    # 3. Determine scoring team
-    team_name, team_slug, level = resolve_scoring_team(event_type or "", game_info)
+    # 3. Determine scoring team — prefer event metadata['team'] when an
+    # event_id is supplied; fall back to event_type prefix otherwise.
+    team_hint: str | None = None
+    if event_id:
+        matching = next((e for e in state.events if e.id == event_id), None)
+        if matching is not None:
+            raw_hint = matching.metadata.get("team") if matching.metadata else None
+            if isinstance(raw_hint, str) and raw_hint:
+                team_hint = raw_hint
+    team_name, team_slug, level = resolve_scoring_team(
+        event_type or "", game_info, team_hint=team_hint
+    )
 
     # 4. Load team profile → roster
     try:
@@ -241,7 +272,10 @@ def _resolve_player_numbers(
         if candidate.is_file():
             logo = candidate
 
-    return (scorer, assists_csv, team_name, logo)
+    # 7. Forward team colors so the overlay can theme around them.
+    team_colors = list(team_profile.colors) if team_profile.colors else []
+
+    return (scorer, assists_csv, team_name, logo, team_colors)
 
 
 def _do_short(
@@ -264,7 +298,7 @@ def _do_short(
     *,
     is_preview: bool,
     event_id: str | None = None,
-    render_profile_name: str | None = None,
+    render_profile_names: list[str] | None = None,
     iterate: bool = False,
     debug: bool = False,
     player: str | None = None,
@@ -289,6 +323,12 @@ def _do_short(
 
     activate_plugins(config.plugins)
 
+    # Normalize the profile list — accept None/empty and dedupe-via-preserve-order
+    # against accidental double specification while keeping intentional repeats
+    # (the user might want the same profile twice). Render_iterations handles
+    # both correctly; we just need a concrete list to inspect.
+    profile_names: list[str] = list(render_profile_names) if render_profile_names else []
+
     # Collect plugin-contributed inputs
     from reeln.plugins.inputs import get_input_collector as _get_input_collector
 
@@ -299,9 +339,21 @@ def _do_short(
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
     _logo_path: Path | None = None
+    _scoring_team_colors: list[str] = []
     if player_numbers is not None:
-        scorer, assists_from_roster, _scoring_team_name, _logo_path = _resolve_player_numbers(
-            player_numbers, event_type, game_dir, config.paths.output_dir, clip
+        (
+            scorer,
+            assists_from_roster,
+            _scoring_team_name,
+            _logo_path,
+            _scoring_team_colors,
+        ) = _resolve_player_numbers(
+            player_numbers,
+            event_type,
+            game_dir,
+            config.paths.output_dir,
+            clip,
+            event_id=event_id,
         )
         # Explicit --player/--assists take precedence over roster lookup
         if player is None:
@@ -309,8 +361,13 @@ def _do_short(
         if assists is None:
             assists = assists_from_roster
         # Auto-apply player-overlay profile when no explicit -r is given
-        if render_profile_name is None and not iterate and "player-overlay" in config.render_profiles:
-            render_profile_name = "player-overlay"
+        if not profile_names and not iterate and "player-overlay" in config.render_profiles:
+            profile_names = ["player-overlay"]
+
+    # Single-profile name kept for the existing one-pass code path; the
+    # multi-profile branch below handles len(profile_names) > 1 via
+    # ``render_iterations`` (the same engine used by ``--iterate``).
+    render_profile_name: str | None = profile_names[0] if profile_names else None
 
     if clip is None:
         source_dir = config.paths.source_dir
@@ -380,6 +437,9 @@ def _do_short(
         crf=config.video.crf,
         audio_codec=config.video.audio_codec,
         audio_bitrate=config.video.audio_bitrate,
+        tune=config.video.tune,
+        pix_fmt=config.video.pix_fmt,
+        movflags=config.video.movflags,
         smart_zoom_frames=resolved_zoom_frames,
         logo=_logo_path,
     )
@@ -432,6 +492,7 @@ def _do_short(
                     event_metadata=event_meta,
                     scoring_team=_scoring_team_name,
                     has_logo=_logo_path is not None,
+                    home_colors=_scoring_team_colors or None,
                 )
 
             subtitle_dir = (output or _default_output(clip, "_short")).parent
@@ -452,30 +513,12 @@ def _do_short(
         except ReelnError as exc:
             typer.echo(f"Warning: Failed to resolve branding, continuing without: {exc}", err=True)
     if branding_subtitle is not None:
-        short_config = ShortConfig(
-            input=short_config.input,
-            output=short_config.output,
-            width=short_config.width,
-            height=short_config.height,
-            crop_mode=short_config.crop_mode,
-            anchor_x=short_config.anchor_x,
-            anchor_y=short_config.anchor_y,
-            scale=short_config.scale,
-            smart=short_config.smart,
-            pad_color=short_config.pad_color,
-            speed=short_config.speed,
-            lut=short_config.lut,
-            subtitle=short_config.subtitle,
-            codec=short_config.codec,
-            preset=short_config.preset,
-            crf=short_config.crf,
-            audio_codec=short_config.audio_codec,
-            audio_bitrate=short_config.audio_bitrate,
-            speed_segments=short_config.speed_segments,
-            smart_zoom_frames=short_config.smart_zoom_frames,
-            branding=branding_subtitle,
-            logo=short_config.logo,
-        )
+        # ``replace`` preserves every other field automatically — including
+        # ``tune``/``pix_fmt``/``movflags`` added in the quality pass that
+        # would otherwise silently fall back to defaults via re-construction.
+        from dataclasses import replace as _replace_short
+
+        short_config = _replace_short(short_config, branding=branding_subtitle)
 
     # Smart zoom: extract frames before iterate or single render
     import tempfile
@@ -538,27 +581,12 @@ def _do_short(
                     err=True,
                 )
                 zoom_path = None
-                short_config = ShortConfig(
-                    input=short_config.input,
-                    output=short_config.output,
-                    width=short_config.width,
-                    height=short_config.height,
+                from dataclasses import replace as _replace_short
+
+                short_config = _replace_short(
+                    short_config,
                     crop_mode=fallback_mode,
-                    anchor_x=short_config.anchor_x,
-                    anchor_y=short_config.anchor_y,
-                    scale=short_config.scale,
                     smart=False,
-                    pad_color=short_config.pad_color,
-                    speed=short_config.speed,
-                    lut=short_config.lut,
-                    subtitle=short_config.subtitle,
-                    codec=short_config.codec,
-                    preset=short_config.preset,
-                    crf=short_config.crf,
-                    audio_codec=short_config.audio_codec,
-                    audio_bitrate=short_config.audio_bitrate,
-                    smart_zoom_frames=short_config.smart_zoom_frames,
-                    logo=short_config.logo,
                 )
 
         source_fps = extracted_frames.fps if extracted_frames is not None else 30.0
@@ -581,70 +609,87 @@ def _do_short(
             except ReelnError:
                 pass
 
-        # Multi-iteration mode
+        # Multi-profile rendering: either explicit (multiple ``--render-profile``
+        # flags from the dock or a power CLI user) or implicit via ``--iterate``
+        # (profile list resolved from event-type config). Both go through the
+        # same ``render_iterations`` engine, which renders each profile to a
+        # temp file, xfades/concats them into the final output, and produces a
+        # single queue entry / POST_RENDER hook for the concatenated result.
+        multi_profile_list: list[str] | None = None
         if iterate:
-            from reeln.core.iterations import render_iterations
             from reeln.core.profiles import profiles_for_event
+
+            iter_profile_list = profiles_for_event(config, render_game_event)
+            if iter_profile_list:
+                multi_profile_list = list(iter_profile_list)
+            else:
+                typer.echo(
+                    "Warning: No iteration profiles configured, using single render",
+                    err=True,
+                )
+        elif len(profile_names) > 1:
+            multi_profile_list = list(profile_names)
+
+        if multi_profile_list:
+            from reeln.core.iterations import render_iterations
             from reeln.core.templates import build_base_context
 
-            profile_list = profiles_for_event(config, render_game_event)
-            if profile_list:
-                iter_ctx: TemplateContext | None = (
-                    build_base_context(render_game_info, render_game_event) if render_game_info else None
+            iter_ctx: TemplateContext | None = (
+                build_base_context(render_game_info, render_game_event) if render_game_info else None
+            )
+            if player is not None and iter_ctx is not None:
+                iter_ctx = TemplateContext(variables={**iter_ctx.variables, "player": player})
+            event_meta = dict(render_game_event.metadata) if render_game_event else None
+            if assists is not None:
+                event_meta = event_meta or {}
+                event_meta["assists"] = assists
+            try:
+                ffmpeg_path = discover_ffmpeg()
+                _, messages = render_iterations(
+                    clip,
+                    multi_profile_list,
+                    config,
+                    ffmpeg_path,
+                    out,
+                    context=iter_ctx,
+                    event_metadata=event_meta,
+                    is_short=True,
+                    short_config=short_config,
+                    zoom_path=zoom_path,
+                    source_fps=source_fps,
+                    dry_run=dry_run,
+                    game_info=render_game_info,
+                    game_event=render_game_event,
+                    player=player,
+                    assists=assists,
+                    queue=queue,
+                    config_profile=profile or "",
+                    scoring_team_colors=_scoring_team_colors or None,
                 )
-                if player is not None and iter_ctx is not None:
-                    iter_ctx = TemplateContext(variables={**iter_ctx.variables, "player": player})
-                event_meta = dict(render_game_event.metadata) if render_game_event else None
-                if assists is not None:
-                    event_meta = event_meta or {}
-                    event_meta["assists"] = assists
-                try:
-                    ffmpeg_path = discover_ffmpeg()
-                    _, messages = render_iterations(
-                        clip,
-                        profile_list,
-                        config,
-                        ffmpeg_path,
-                        out,
-                        context=iter_ctx,
-                        event_metadata=event_meta,
-                        is_short=True,
-                        short_config=short_config,
-                        zoom_path=zoom_path,
-                        source_fps=source_fps,
-                        dry_run=dry_run,
-                        game_info=render_game_info,
-                        game_event=render_game_event,
-                        player=player,
-                        assists=assists,
-                        queue=queue,
-                        config_profile=profile or "",
+            except ReelnError as exc:
+                typer.echo(f"Error: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            for msg in messages:
+                typer.echo(msg)
+
+            # Debug output for the multi-profile path
+            if debug:
+                resolved_gd = game_dir or _find_game_dir(config.paths.output_dir, clip)
+                if resolved_gd is not None and extracted_frames is not None:
+                    from reeln.core.zoom_debug import write_zoom_debug
+
+                    write_zoom_debug(
+                        resolved_gd,
+                        extracted_frames,
+                        zoom_path,
+                        short_config.width,
+                        short_config.height,
+                        ffmpeg_path=ffmpeg_path,
+                        plugin_debug=plugin_debug_data,
                     )
-                except ReelnError as exc:
-                    typer.echo(f"Error: {exc}", err=True)
-                    raise typer.Exit(code=1) from exc
-                for msg in messages:
-                    typer.echo(msg)
+                    typer.echo(f"Debug: {resolved_gd / 'debug'}")
 
-                # Debug output for iterate path
-                if debug:
-                    resolved_gd = game_dir or _find_game_dir(config.paths.output_dir, clip)
-                    if resolved_gd is not None and extracted_frames is not None:
-                        from reeln.core.zoom_debug import write_zoom_debug
-
-                        write_zoom_debug(
-                            resolved_gd,
-                            extracted_frames,
-                            zoom_path,
-                            short_config.width,
-                            short_config.height,
-                            ffmpeg_path=ffmpeg_path,
-                            plugin_debug=plugin_debug_data,
-                        )
-                        typer.echo(f"Debug: {resolved_gd / 'debug'}")
-
-                return
-            typer.echo("Warning: No iteration profiles configured, using single render", err=True)
+            return
 
         try:
             if is_preview:
@@ -844,7 +889,16 @@ def short(
     subtitle: Path | None = typer.Option(None, "--subtitle", help="ASS subtitle file."),
     game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
     event: str | None = typer.Option(None, "--event", help="Link to event ID (auto-detected if omitted)."),
-    render_profile: str | None = typer.Option(None, "--render-profile", "-r", help="Named render profile from config."),
+    render_profile: list[str] = typer.Option(
+        [],
+        "--render-profile",
+        "-r",
+        help=(
+            "Named render profile from config. Repeatable: passing the flag "
+            "twice renders each profile and concatenates the results into a "
+            "single output (and a single queue entry / render history entry)."
+        ),
+    ),
     player_name: str | None = typer.Option(None, "--player", help="Player name for overlay."),
     assists_str: str | None = typer.Option(None, "--assists", help="Assists, comma-separated."),
     player_numbers_str: str | None = typer.Option(
@@ -890,7 +944,7 @@ def short(
         dry_run,
         is_preview=False,
         event_id=event,
-        render_profile_name=render_profile,
+        render_profile_names=render_profile,
         iterate=iterate,
         debug=debug_flag,
         player=player_name,
@@ -919,7 +973,12 @@ def preview(
     lut: Path | None = typer.Option(None, "--lut", help="LUT file (.cube/.3dl)."),
     subtitle: Path | None = typer.Option(None, "--subtitle", help="ASS subtitle file."),
     game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for render tracking."),
-    render_profile: str | None = typer.Option(None, "--render-profile", "-r", help="Named render profile from config."),
+    render_profile: list[str] = typer.Option(
+        [],
+        "--render-profile",
+        "-r",
+        help="Named render profile from config. Repeatable (concatenated).",
+    ),
     player_name: str | None = typer.Option(None, "--player", help="Player name for overlay."),
     assists_str: str | None = typer.Option(None, "--assists", help="Assists, comma-separated."),
     player_numbers_str: str | None = typer.Option(
@@ -963,7 +1022,7 @@ def preview(
         config_path,
         dry_run,
         is_preview=True,
-        render_profile_name=render_profile,
+        render_profile_names=render_profile,
         iterate=iterate,
         debug=debug_flag,
         player=player_name,
@@ -1065,7 +1124,16 @@ def reel(
 @app.command(name="apply")
 def apply_profile(
     clip: Path = typer.Argument(..., help="Input video file."),
-    render_profile: str = typer.Option(..., "--render-profile", "-r", help="Named render profile from config."),
+    render_profile: list[str] = typer.Option(
+        [],
+        "--render-profile",
+        "-r",
+        help=(
+            "Named render profile from config. Repeatable: passing the flag "
+            "twice renders each profile and concatenates the results into a "
+            "single output (and a single queue entry / render history entry)."
+        ),
+    ),
     output: Path | None = typer.Option(None, "--output", "-o", help="Output file path."),
     game_dir: Path | None = typer.Option(None, "--game-dir", help="Game directory for template context."),
     event: str | None = typer.Option(None, "--event", help="Event ID for template context."),
@@ -1086,6 +1154,12 @@ def apply_profile(
     queue_flag: bool = typer.Option(False, "--queue", "-q", help="Queue for review instead of publishing immediately."),
 ) -> None:
     """Apply a named render profile to a clip (full-frame, no crop/scale)."""
+    # ``--render-profile`` is required (was ``str = typer.Option(...)``) so we
+    # validate the list manually now that it's repeatable. Empty list mirrors
+    # the previous "missing required option" error.
+    if not render_profile and not iterate:
+        typer.echo("Error: Missing option '--render-profile' / '-r'.", err=True)
+        raise typer.Exit(code=2)
     from reeln.core.profiles import (
         plan_full_frame,
         resolve_profile,
@@ -1103,16 +1177,31 @@ def apply_profile(
 
     # Resolve --player-numbers before anything else
     _scoring_team_name: str | None = None
+    _scoring_team_colors: list[str] = []
     if player_numbers_str is not None:
-        scorer, assists_from_roster, _scoring_team_name, _ = _resolve_player_numbers(
-            player_numbers_str, event_type, game_dir, config.paths.output_dir, clip
+        (
+            scorer,
+            assists_from_roster,
+            _scoring_team_name,
+            _,
+            _scoring_team_colors,
+        ) = _resolve_player_numbers(
+            player_numbers_str,
+            event_type,
+            game_dir,
+            config.paths.output_dir,
+            clip,
+            event_id=event,
         )
         if player_name is None:
             player_name = scorer
         if assists_str is None:
             assists_str = assists_from_roster
 
-    out = output or _default_output(clip, f"_{render_profile}")
+    # Single-profile name used by the existing one-pass code path; the
+    # multi-profile branch below routes through render_iterations.
+    render_profile_name: str = render_profile[0] if render_profile else ""
+    out = output or _default_output(clip, f"_{render_profile_name or 'apply'}")
 
     # Build template context for subtitle rendering
     from reeln.models.game import GameEvent as _ApplyEvent
@@ -1132,50 +1221,65 @@ def apply_profile(
         except ReelnError:
             pass  # non-fatal: just skip context
 
-    # Multi-iteration mode
+    # Multi-profile rendering: ``--iterate`` (event-type config-derived list)
+    # or explicit (multiple ``--render-profile`` flags). Both route through
+    # ``render_iterations``, which produces one final concatenated output and
+    # exactly one queue entry / POST_RENDER hook.
+    multi_profile_list: list[str] | None = None
     if iterate:
-        from reeln.core.iterations import render_iterations
         from reeln.core.profiles import profiles_for_event
 
-        profile_list = profiles_for_event(config, apply_game_event)
-        if profile_list:
-            ctx = build_base_context(apply_game_info, apply_game_event) if apply_game_info else None
-            if player_name is not None and ctx is not None:
-                ctx = TemplateContext(variables={**ctx.variables, "player": player_name})
-            event_meta = dict(apply_game_event.metadata) if apply_game_event else None
-            if assists_str is not None:
-                event_meta = event_meta or {}
-                event_meta["assists"] = assists_str
-            try:
-                from reeln.core.ffmpeg import discover_ffmpeg
+        iter_profile_list = profiles_for_event(config, apply_game_event)
+        if iter_profile_list:
+            multi_profile_list = list(iter_profile_list)
+        else:
+            typer.echo(
+                "Warning: No iteration profiles configured, using single render",
+                err=True,
+            )
+    elif len(render_profile) > 1:
+        multi_profile_list = list(render_profile)
 
-                ffmpeg_path = discover_ffmpeg()
-                _, messages = render_iterations(
-                    clip,
-                    profile_list,
-                    config,
-                    ffmpeg_path,
-                    out,
-                    context=ctx,
-                    event_metadata=event_meta,
-                    dry_run=dry_run,
-                    game_info=apply_game_info,
-                    game_event=apply_game_event,
-                    player=player_name,
-                    assists=assists_str,
-                    queue=queue_flag,
-                    config_profile=profile or "",
-                )
-            except ReelnError as exc:
-                typer.echo(f"Error: {exc}", err=True)
-                raise typer.Exit(code=1) from exc
-            for msg in messages:
-                typer.echo(msg)
-            return
-        typer.echo("Warning: No iteration profiles configured, using single render", err=True)
+    if multi_profile_list:
+        from reeln.core.iterations import render_iterations
+
+        ctx = build_base_context(apply_game_info, apply_game_event) if apply_game_info else None
+        if player_name is not None and ctx is not None:
+            ctx = TemplateContext(variables={**ctx.variables, "player": player_name})
+        event_meta = dict(apply_game_event.metadata) if apply_game_event else None
+        if assists_str is not None:
+            event_meta = event_meta or {}
+            event_meta["assists"] = assists_str
+        try:
+            from reeln.core.ffmpeg import discover_ffmpeg
+
+            ffmpeg_path = discover_ffmpeg()
+            _, messages = render_iterations(
+                clip,
+                multi_profile_list,
+                config,
+                ffmpeg_path,
+                out,
+                context=ctx,
+                event_metadata=event_meta,
+                dry_run=dry_run,
+                game_info=apply_game_info,
+                game_event=apply_game_event,
+                player=player_name,
+                assists=assists_str,
+                queue=queue_flag,
+                config_profile=profile or "",
+                scoring_team_colors=_scoring_team_colors or None,
+            )
+        except ReelnError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        for msg in messages:
+            typer.echo(msg)
+        return
 
     try:
-        rp = resolve_profile(config, render_profile)
+        rp = resolve_profile(config, render_profile_name)
     except ReelnError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -1202,6 +1306,7 @@ def apply_profile(
                     duration=dur,
                     event_metadata=event_meta,
                     scoring_team=_scoring_team_name,
+                    home_colors=_scoring_team_colors or None,
                 )
             out.parent.mkdir(parents=True, exist_ok=True)
             rendered_subtitle = resolve_subtitle_for_profile(rp, ctx, out.parent)
@@ -1214,7 +1319,7 @@ def apply_profile(
 
         typer.echo(f"Input: {clip}")
         typer.echo(f"Output: {out}")
-        typer.echo(f"Profile: {render_profile}")
+        typer.echo(f"Profile: {render_profile_name}")
         if rp.speed is not None and rp.speed != 1.0:
             typer.echo(f"Speed: {rp.speed}x")
         if rp.lut is not None:
@@ -1258,7 +1363,7 @@ def apply_profile(
                 game_event=apply_game_event,
                 player=player_name or "",
                 assists=assists_str or "",
-                render_profile=render_profile,
+                render_profile=render_profile_name,
                 event_id=event or "",
                 available_targets=apply_targets,
                 config_profile=profile or "",
@@ -1303,7 +1408,7 @@ def apply_profile(
                 out,
                 resolved_game_dir,
                 ffmpeg_path,
-                extra={"profile": render_profile},
+                extra={"profile": render_profile_name},
             )
             write_debug_artifact(resolved_game_dir, artifact)
             write_debug_index(resolved_game_dir)

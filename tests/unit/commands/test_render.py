@@ -2804,6 +2804,58 @@ def test_render_apply_iterate_executes(tmp_path: Path) -> None:
     assert "Iteration rendering complete" in result.output
 
 
+def test_render_apply_multiple_render_profiles_routes_to_iterations(
+    tmp_path: Path,
+) -> None:
+    """Two explicit ``--render-profile`` flags route through render_iterations
+    so the two passes are concatenated into a single output.
+
+    Regression: previously ``--render-profile`` was a single ``str`` option,
+    so passing it twice silently kept only the last value and rendered just
+    one of the two profiles. The dock relies on the repeatable form to
+    realize per-event profile lists picked in the UI.
+    """
+    from unittest.mock import MagicMock
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "out.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    mock_render = MagicMock(
+        return_value=(iter_result, ["Iteration rendering complete"]),
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.iterations.render_iterations", mock_render),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "apply",
+                str(clip),
+                "--render-profile",
+                "fullspeed",
+                "--render-profile",
+                "slowmo",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "Iteration rendering complete" in result.output
+    # The profile list passed to render_iterations must be the user's
+    # explicit order, NOT derived from event-type config.
+    assert mock_render.called
+    passed_profile_list = mock_render.call_args.args[1]
+    assert passed_profile_list == ["fullspeed", "slowmo"]
+
+
 def test_render_apply_iterate_no_profiles_falls_through(tmp_path: Path) -> None:
     clip = tmp_path / "clip.mkv"
     clip.touch()
@@ -2910,6 +2962,90 @@ def test_render_apply_iterate_error(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # --iterate on render short / render preview
 # ---------------------------------------------------------------------------
+
+
+def test_render_short_multiple_render_profiles_routes_to_iterations(
+    tmp_path: Path,
+) -> None:
+    """Two explicit ``--render-profile`` flags on ``render short`` route
+    through render_iterations.
+
+    Regression: this is the exact dock-from-queue render path. Without
+    this fix, ``render short --render-profile player-overlay
+    --render-profile slowmo-ten-second-clip`` quietly dropped the first
+    profile (a typer ``str`` option keeps the last value), so the queued
+    publish only produced the slowmo pass.
+    """
+    from unittest.mock import MagicMock
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    cfg = _config_with_iterations(tmp_path)
+    iter_result = IterationResult(
+        output=tmp_path / "clip_short.mp4",
+        iteration_outputs=[],
+        profile_names=["fullspeed", "slowmo"],
+        concat_copy=True,
+    )
+    mock_render = MagicMock(
+        return_value=(iter_result, ["Iteration rendering complete"]),
+    )
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.iterations.render_iterations", mock_render),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--render-profile",
+                "fullspeed",
+                "--render-profile",
+                "slowmo",
+                "--config",
+                str(cfg),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "Iteration rendering complete" in result.output
+    # The user's explicit order must be preserved end-to-end.
+    assert mock_render.called
+    passed_profile_list = mock_render.call_args.args[1]
+    assert passed_profile_list == ["fullspeed", "slowmo"]
+
+
+def test_render_short_single_render_profile_uses_single_pass(tmp_path: Path) -> None:
+    """Backwards-compat: one ``--render-profile`` keeps the single-pass path
+    (no concat overhead, identical output to pre-change behavior)."""
+    from unittest.mock import MagicMock
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    cfg = _config_with_profile(tmp_path, "slowmo", speed=0.5)
+    mock_render = MagicMock()
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.iterations.render_iterations", mock_render),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--render-profile",
+                "slowmo",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # Single profile must NOT route through render_iterations — the
+    # concat path is for ≥2 profiles only.
+    mock_render.assert_not_called()
 
 
 def test_render_short_iterate_dry_run(tmp_path: Path) -> None:
@@ -4972,6 +5108,438 @@ def test_player_numbers_away_goal(tmp_path: Path) -> None:
             ],
         )
     assert result.exit_code == 0, result.output
+
+
+def test_player_numbers_metadata_team_hint_away_overrides_generic_event_type(
+    tmp_path: Path,
+) -> None:
+    """Generic ``event_type='goal'`` + ``metadata['team']='away'`` → away roster.
+
+    Regression: the dock tags events with a generic ``event_type='goal'``
+    and records the scoring side in ``metadata['team']``. Without the
+    hint plumbed through ``_resolve_player_numbers``, the resolver fell
+    back to the event-type prefix and silently loaded the home roster
+    for every away goal.
+    """
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    state = _game_state_with_level()
+    state = GameState(
+        game_info=state.game_info,
+        created_at=state.created_at,
+        events=[
+            GameEvent(
+                id="ev_away_1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                metadata={"team": "away"},
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    away_profile = TeamProfile(
+        team_name="Bears",
+        short_name="BRS",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+    load_team_profile_mock = MagicMock(return_value=away_profile)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", load_team_profile_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "goal",
+                "--event",
+                "ev_away_1",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # The away team's profile must have been requested — not the home team.
+    load_team_profile_mock.assert_called_once_with("bantam", "bears")
+
+
+def test_player_numbers_metadata_team_hint_home_with_generic_event_type(
+    tmp_path: Path,
+) -> None:
+    """Symmetric guard: ``metadata['team']='home'`` resolves the home roster
+    even when the event type is generic. Without the hint, the previous
+    code path also defaulted to home — so this test catches a future
+    regression where the hint inversion would silently send home events
+    to the away roster.
+    """
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    base = _game_state_with_level()
+    state = GameState(
+        game_info=base.game_info,
+        created_at=base.created_at,
+        events=[
+            GameEvent(
+                id="ev_home_1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                metadata={"team": "home"},
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+    load_team_profile_mock = MagicMock(return_value=home_profile)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", load_team_profile_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "goal",
+                "--event",
+                "ev_home_1",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    load_team_profile_mock.assert_called_once_with("bantam", "eagles")
+
+
+def test_player_numbers_team_colors_reach_overlay_context(tmp_path: Path) -> None:
+    """Team profile ``colors`` flow through to ``build_overlay_context``.
+
+    Regression: without this plumbing every rendered overlay used the
+    default flat-gray palette regardless of the team's saved colors,
+    which is exactly what the dock reported (Yuro Stars had five
+    configured colors but the overlay still rendered gray).
+    """
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    state = _game_state_with_level()
+    state = GameState(
+        game_info=state.game_info,
+        created_at=state.created_at,
+        events=[
+            GameEvent(
+                id="ev1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                metadata={"team": "home"},
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    expected_colors = ["#98f219", "#295a06", "#7c8b3e"]
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+        colors=expected_colors,
+    )
+
+    # Wrap the real ``build_overlay_context`` so we can spy on the kwargs
+    # while keeping the rest of the render pipeline intact.
+    from reeln.core import overlay as overlay_mod
+
+    overlay_spy = MagicMock(wraps=overlay_mod.build_overlay_context)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+        patch("reeln.core.overlay.build_overlay_context", overlay_spy),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "goal",
+                "--event",
+                "ev1",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert overlay_spy.called, "build_overlay_context was never reached"
+    kwargs = overlay_spy.call_args.kwargs
+    assert kwargs.get("home_colors") == expected_colors
+
+
+def test_player_numbers_empty_team_colors_does_not_pass_home_colors(
+    tmp_path: Path,
+) -> None:
+    """When the team profile has no colors, the overlay uses defaults.
+
+    Guard against accidentally sending ``home_colors=[]`` (which would
+    skip the parse branch but still differ from the default-path None);
+    ``_resolve_player_numbers`` returns ``[]`` and the call site coerces
+    that to ``None`` so behavior matches pre-fix output exactly.
+    """
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    state = _game_state_with_level()
+    state = GameState(
+        game_info=state.game_info,
+        created_at=state.created_at,
+        events=[
+            GameEvent(
+                id="ev1",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                metadata={"team": "home"},
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    # team profile with NO colors
+    home_profile = TeamProfile(
+        team_name="Eagles",
+        short_name="EGL",
+        level="bantam",
+        roster_path=str(roster_path),
+        colors=[],
+    )
+
+    from reeln.core import overlay as overlay_mod
+
+    overlay_spy = MagicMock(wraps=overlay_mod.build_overlay_context)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", return_value=home_profile),
+        patch("reeln.core.overlay.build_overlay_context", overlay_spy),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "goal",
+                "--event",
+                "ev1",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert overlay_spy.called
+    kwargs = overlay_spy.call_args.kwargs
+    assert kwargs.get("home_colors") is None
+
+
+def test_player_numbers_event_id_missing_falls_back_to_event_type_prefix(
+    tmp_path: Path,
+) -> None:
+    """When ``--event`` is omitted, resolution falls back to event-type
+    prefix matching so legacy CLI usage (``--event-type AWAY_GOAL``)
+    continues to work unchanged."""
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {
+        "render_profiles": {
+            "overlay": {"subtitle_template": str(template)},
+        },
+    }
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    away_profile = TeamProfile(
+        team_name="Bears",
+        short_name="BRS",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+    load_team_profile_mock = MagicMock(return_value=away_profile)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", load_team_profile_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render",
+                "short",
+                str(clip),
+                "--player-numbers",
+                "48",
+                "--event-type",
+                "AWAY_GOAL",
+                "--game-dir",
+                str(game_dir),
+                "--render-profile",
+                "overlay",
+                "--config",
+                str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    load_team_profile_mock.assert_called_once_with("bantam", "bears")
 
 
 def test_player_numbers_game_state_load_error(tmp_path: Path) -> None:

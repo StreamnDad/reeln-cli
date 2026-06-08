@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -112,6 +113,16 @@ def test_default_config_path_with_profile() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _reset_active_config_path() -> Iterator[None]:
+    """Ensure tests don't leak ``_ACTIVE_CONFIG_PATH`` between runs."""
+    import reeln.core.config as _cfg_mod
+
+    _cfg_mod._ACTIVE_CONFIG_PATH = None
+    yield
+    _cfg_mod._ACTIVE_CONFIG_PATH = None
+
+
 def test_config_base_dir_with_reeln_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """When REELN_CONFIG is set, _config_base_dir returns its parent directory."""
     monkeypatch.setenv("REELN_CONFIG", "/custom/path/config.json")
@@ -123,6 +134,59 @@ def test_config_base_dir_without_reeln_config(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("REELN_CONFIG", raising=False)
     with patch("reeln.core.config.config_dir", return_value=Path("/default/cfg")):
         assert _config_base_dir() == Path("/default/cfg")
+
+
+def test_config_base_dir_active_config_path_wins_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active config path takes priority over the REELN_CONFIG env var.
+
+    Guards the dock workflow: dock passes --config (which sets the active
+    path) without exporting REELN_CONFIG. Even if a stale REELN_CONFIG is
+    present, the explicit --config must win for team/roster lookup.
+    """
+    import reeln.core.config as _cfg_mod
+
+    monkeypatch.setenv("REELN_CONFIG", "/stale/path/config.json")
+    _cfg_mod._ACTIVE_CONFIG_PATH = Path("/active/path/config.production.json")
+    assert _config_base_dir() == Path("/active/path")
+
+
+def test_config_base_dir_active_config_path_no_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active config path is used when REELN_CONFIG is absent."""
+    import reeln.core.config as _cfg_mod
+
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    _cfg_mod._ACTIVE_CONFIG_PATH = Path("/active/path/config.json")
+    assert _config_base_dir() == Path("/active/path")
+
+
+def test_load_config_sets_active_config_path(tmp_path: Path) -> None:
+    """``load_config`` records the resolved path so teams/rosters resolve."""
+    import reeln.core.config as _cfg_mod
+
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"config_version": 1, "sport": "hockey"}))
+
+    load_config(path=cfg_file)
+    assert _cfg_mod._ACTIVE_CONFIG_PATH == cfg_file
+    assert _config_base_dir() == tmp_path
+
+
+def test_load_config_default_does_not_set_active_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Implicit (default) load_config must not poison the active path."""
+    import reeln.core.config as _cfg_mod
+
+    monkeypatch.delenv("REELN_CONFIG", raising=False)
+    monkeypatch.delenv("REELN_PROFILE", raising=False)
+    with patch("reeln.core.config.config_dir", return_value=tmp_path):
+        load_config()
+    assert _cfg_mod._ACTIVE_CONFIG_PATH is None
 
 
 # ---------------------------------------------------------------------------
@@ -812,13 +876,52 @@ def test_validate_config_event_types_not_list() -> None:
     assert any("event_types" in i for i in issues)
 
 
-def test_validate_config_event_types_entry_not_string() -> None:
+def test_validate_config_event_types_entry_not_string_or_object() -> None:
+    """Integers and other scalars are rejected; the message names the slot."""
     issues = validate_config({"config_version": 1, "event_types": [123]})
+    assert any("event_types[0]" in i for i in issues)
+
+
+def test_validate_config_event_types_object_without_name_rejected() -> None:
+    """Object form is accepted, but only when it carries a string ``name``."""
+    issues = validate_config(
+        {"config_version": 1, "event_types": [{"team_specific": True}]}
+    )
     assert any("event_types[0]" in i for i in issues)
 
 
 def test_validate_config_event_types_valid() -> None:
     issues = validate_config({"config_version": 1, "event_types": ["goal", "save"]})
+    assert issues == []
+
+
+def test_validate_config_event_types_object_form_valid() -> None:
+    """``{name, team_specific}`` entries are first-class, not warnings.
+
+    Regression: the dock writes this form by default; the previous
+    validator flagged every entry as ``must be a string`` even though
+    ``dict_to_config`` accepts it.
+    """
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": [
+                {"name": "goal", "team_specific": True},
+                {"name": "save", "team_specific": False},
+            ],
+        }
+    )
+    assert issues == []
+
+
+def test_validate_config_event_types_mixed_forms_valid() -> None:
+    """String and object entries can coexist in the same list."""
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": ["penalty", {"name": "goal", "team_specific": True}],
+        }
+    )
     assert issues == []
 
 
@@ -831,6 +934,23 @@ def test_validate_config_iterations_references_unknown_event_type() -> None:
         }
     )
     assert any("save" in i for i in issues)
+
+
+def test_validate_config_iterations_cross_validates_object_event_types() -> None:
+    """Cross-validation must recognize names declared via object form.
+
+    Regression: when ``event_types`` used the object form, the type set
+    was empty, so any iteration mapping (including ``goal``) triggered
+    a spurious ``not listed in event_types`` warning.
+    """
+    issues = validate_config(
+        {
+            "config_version": 1,
+            "event_types": [{"name": "goal", "team_specific": True}],
+            "iterations": {"mappings": {"goal": ["player-overlay"]}},
+        }
+    )
+    assert issues == []
 
 
 def test_validate_config_iterations_nested_mappings_key() -> None:
@@ -902,7 +1022,12 @@ def test_load_config_defaults_no_file(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("reeln.core.config.default_config_path", return_value=Path("/nonexistent/config.json")):
         cfg = load_config()
     assert cfg.sport == "generic"
-    assert cfg.video.crf == 18
+    # CRF 16 is the post-quality-pass default (was 18 before).
+    assert cfg.video.crf == 16
+    # Quality-pass defaults flow through deserialization.
+    assert cfg.video.tune == "film"
+    assert cfg.video.pix_fmt == "yuv420p"
+    assert cfg.video.movflags == "+faststart"
 
 
 def test_load_config_explicit_path_not_found(tmp_path: Path) -> None:

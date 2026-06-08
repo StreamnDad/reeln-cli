@@ -681,7 +681,9 @@ def test_plan_short_defaults(tmp_path: Path) -> None:
     assert plan.output == tmp_path / "out.mp4"
     assert plan.codec == "libx264"
     assert plan.preset == "medium"
-    assert plan.crf == 18
+    # Quality-pass default: lowered from 18 → 16. ShortConfig's default
+    # propagates through plan_short.
+    assert plan.crf == 16
     assert plan.width == 1080
     assert plan.height == 1920
     assert plan.filter_complex is not None
@@ -712,6 +714,59 @@ def test_plan_short_custom_encoding(tmp_path: Path) -> None:
     assert plan.crf == 22
     assert plan.audio_codec == "opus"
     assert plan.audio_bitrate == "192k"
+
+
+def test_plan_short_emits_quality_extra_args(tmp_path: Path) -> None:
+    """Quality-pass flags (pix_fmt / tune / movflags) flow into extra_args.
+
+    Regression for the user-reported "lower resolution / choppy" feel:
+    without ``-pix_fmt yuv420p`` browsers and social platforms can reject
+    or silently re-encode the file; without ``-tune film`` libx264 picks
+    motion estimation parameters tuned for the wrong content; without
+    ``-movflags +faststart`` web streamers stall on the first byte
+    waiting for the moov atom.
+    """
+    cfg = _cfg(tmp_path)
+    plan = plan_short(cfg)
+    # Each flag appears as a -k v pair in extra_args.
+    assert "-pix_fmt" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-pix_fmt") + 1] == "yuv420p"
+    assert "-tune" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-tune") + 1] == "film"
+    assert "-movflags" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-movflags") + 1] == "+faststart"
+
+
+def test_plan_short_empty_quality_flag_omitted(tmp_path: Path) -> None:
+    """An empty string for any quality field opts that flag out completely
+    so users can disable e.g. ``-tune`` for non-film content (animation
+    sources, screen captures) without losing the others."""
+    from dataclasses import replace
+
+    cfg = replace(_cfg(tmp_path), tune="", movflags="")
+    plan = plan_short(cfg)
+    assert "-pix_fmt" in plan.extra_args
+    assert "-tune" not in plan.extra_args
+    assert "-movflags" not in plan.extra_args
+
+
+def test_plan_short_custom_quality_values(tmp_path: Path) -> None:
+    """Each quality flag is configurable per-render."""
+    from dataclasses import replace
+
+    cfg = replace(
+        _cfg(tmp_path),
+        tune="animation",
+        pix_fmt="yuv422p",
+        movflags="+faststart+rtphint",
+    )
+    plan = plan_short(cfg)
+    assert plan.extra_args[plan.extra_args.index("-tune") + 1] == "animation"
+    assert plan.extra_args[plan.extra_args.index("-pix_fmt") + 1] == "yuv422p"
+    assert (
+        plan.extra_args[plan.extra_args.index("-movflags") + 1]
+        == "+faststart+rtphint"
+    )
 
 
 def test_plan_short_validation_error(tmp_path: Path) -> None:

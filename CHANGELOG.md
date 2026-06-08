@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.40] - 2026-06-07
+
+### Added
+
+- `--render-profile` / `-r` is now repeatable on `render short` and `render apply`. Passing the flag multiple times renders each profile and concatenates the results into a single output, with one queue entry and one `render` history entry — matches the dock's multi-profile selection UI exactly.
+- `reeln game set-tournament <name>` command — assigns or updates the tournament for an existing game via the `reeln_native` mutation layer.
+- Quality-pass encoder defaults for short-form output: `-pix_fmt yuv420p` (universal player compatibility), `-tune film` (motion estimation tuned for live action), `-movflags +faststart` (web-streaming moov-atom placement). Each is configurable per render via the new `VideoConfig.pix_fmt` / `.tune` / `.movflags` fields; set any to `""` to opt out.
+- Catmull-Rom spline smoothing for smart-zoom paths: input keyframes are pre-smoothed with a moving average and resampled along a C¹-continuous spline before downsampling to ffmpeg's 8-segment limit, so motion has continuous velocity through every keyframe instead of the visible "kicks" the previous straight downsample produced.
+- Team colors flow from `team_profile.colors` through to the overlay engine. Goal-overlay backgrounds now use the saved team palette instead of falling back to flat gray.
+
+### Changed
+
+- Default short-form CRF lowered from 18 to 16. High-motion sports footage retains visibly crisper detail after vertical crop+upscale, at roughly +30% file size. Existing configs that set `crf` explicitly are honored unchanged.
+- State mutations on `GameState` (events, segments, finish flag, livestreams, highlight merge state, tournament) now route through `reeln_native` JSON-based mutations instead of direct Python assignment. Matches the dock's state-mutation-boundary contract so the CLI and dock share one canonical implementation.
+- `_resolve_player_numbers` now accepts an `event_id` and reads `event.metadata["team"]` as the `team_hint` for `resolve_scoring_team` — the canonical path for dock-tagged events (generic `event_type="goal"` plus team metadata). Without the hint, away goals silently resolved to the home team's roster.
+- `_config_base_dir()` now consults the explicit `--config` path (recorded as the active config) before falling back to `REELN_CONFIG` env or the platform default — so team/roster lookups resolve against the chosen config even when the env var isn't exported.
+- `validate_config()` accepts both string and `{name, team_specific}` object forms for `event_types`, and includes both shapes in iterations cross-validation. The dock writes the object form by default; the validator was incorrectly flagging every entry.
+
+### Fixed
+
+- "Team profile not found" when the dock invoked `reeln render` from a GUI launch (no `REELN_CONFIG` in env) — `_config_base_dir()` now honors `--config` directly.
+- "Choppy tracking" at `--zoom-frames 16+` — the kept keyframes after smoothing now lie on a smooth spline; previously a single outlier OpenAI prediction could survive the downsample and create a visible jump.
+- Goal renders now use the away team's roster when the event metadata says away, fixing the rendered overlay showing the wrong player names.
+- Render passes from the dock's queue now produce both selected profiles (e.g. player-overlay + slowmo) instead of silently keeping only the last `--render-profile` value.
+
 ## [0.0.39] - 2026-04-24
 
 ### Added

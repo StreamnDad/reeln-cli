@@ -10,6 +10,7 @@ from reeln.core.highlights import load_game_state, save_game_state
 from reeln.models.config import VideoConfig
 from reeln.models.game import GameEvent
 from reeln.models.render_plan import CompilationResult
+from reeln.native import get_native, json_to_state, state_to_json
 
 # ---------------------------------------------------------------------------
 # Querying
@@ -71,15 +72,28 @@ def tag_event(
     """Update fields on a single event. Returns the updated event."""
     state = load_game_state(game_dir)
     event = resolve_event_id(state.events, event_id)
+    native = get_native()
 
+    state_json = state_to_json(state)
     if event_type is not None:
-        event.event_type = event_type
+        state_json = native.update_event_field(state_json, event.id, "event_type", event_type)
     if player is not None:
-        event.player = player
+        state_json = native.update_event_field(state_json, event.id, "player", player)
     if metadata_updates:
-        event.metadata.update(metadata_updates)
+        # Metadata values can be non-string (lists, dicts). Apply via the
+        # JSON layer so complex types are preserved.
+        import json as _json
 
+        state_dict = _json.loads(state_json)
+        for evt in state_dict.get("events", []):
+            if evt["id"] == event.id:
+                evt.setdefault("metadata", {}).update(metadata_updates)
+                break
+        state_json = _json.dumps(state_dict)
+
+    state = json_to_state(state_json)  # type: ignore[assignment]
     save_game_state(state, game_dir)
+    event = resolve_event_id(state.events, event_id)
 
     from reeln.plugins.hooks import Hook, HookContext
     from reeln.plugins.registry import get_registry
@@ -106,14 +120,19 @@ def tag_events_in_segment(
     if not matched:
         raise MediaError(f"No events found for segment {segment_number}")
 
-    for event in matched:
-        if event_type is not None:
-            event.event_type = event_type
-        if player is not None:
-            event.player = player
+    native = get_native()
+    state_json = state_to_json(state)
+    matched_ids = [e.id for e in matched]
 
+    if event_type is not None:
+        state_json, _ = native.bulk_update_event_type(state_json, matched_ids, event_type)
+    if player is not None:
+        for eid in matched_ids:
+            state_json = native.update_event_field(state_json, eid, "player", player)
+
+    state = json_to_state(state_json)  # type: ignore[assignment]
     save_game_state(state, game_dir)
-    return matched
+    return [e for e in state.events if e.segment_number == segment_number]
 
 
 # ---------------------------------------------------------------------------

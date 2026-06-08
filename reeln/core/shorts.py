@@ -747,6 +747,24 @@ def _build_speed_segments_chain(
 # ---------------------------------------------------------------------------
 
 
+def _build_quality_extra_args(config: ShortConfig) -> list[str]:
+    """Assemble encoder quality flags for ``RenderPlan.extra_args``.
+
+    Adds ``-pix_fmt`` (player compatibility), ``-tune`` (motion handling
+    for the configured content type) and ``-movflags`` (web-streaming
+    moov-atom placement) when each is non-empty. Skipping a flag with an
+    empty string lets callers opt out per-render.
+    """
+    args: list[str] = []
+    if config.pix_fmt:
+        args.extend(["-pix_fmt", config.pix_fmt])
+    if config.tune:
+        args.extend(["-tune", config.tune])
+    if config.movflags:
+        args.extend(["-movflags", config.movflags])
+    return args
+
+
 def plan_short(
     config: ShortConfig,
     *,
@@ -771,6 +789,7 @@ def plan_short(
         audio_bitrate=config.audio_bitrate,
         filter_complex=filter_complex,
         audio_filter=audio_filter,
+        extra_args=_build_quality_extra_args(config),
     )
 
 
@@ -785,28 +804,17 @@ def plan_preview(config: ShortConfig) -> RenderPlan:
     # Ensure even dimensions
     preview_width += preview_width % 2
     preview_height += preview_height % 2
-    preview = ShortConfig(
-        input=config.input,
-        output=config.output,
+    # ``replace`` carries forward every field from ``config`` (including
+    # the encoder quality flags ``tune``/``pix_fmt``/``movflags``) so we
+    # only need to override what differs for a preview render.
+    from dataclasses import replace as _replace
+
+    preview = _replace(
+        config,
         width=preview_width,
         height=preview_height,
-        crop_mode=config.crop_mode,
-        anchor_x=config.anchor_x,
-        anchor_y=config.anchor_y,
-        scale=config.scale,
-        smart=config.smart,
-        pad_color=config.pad_color,
-        speed=config.speed,
-        speed_segments=config.speed_segments,
-        lut=config.lut,
-        subtitle=config.subtitle,
-        codec=config.codec,
         preset="ultrafast",
         crf=28,
-        audio_codec=config.audio_codec,
-        audio_bitrate=config.audio_bitrate,
-        branding=config.branding,
-        logo=config.logo,
     )
     filter_complex, audio_filter = build_filter_chain(preview)
     inputs: list[Path] = [preview.input]
@@ -824,4 +832,5 @@ def plan_preview(config: ShortConfig) -> RenderPlan:
         audio_bitrate=preview.audio_bitrate,
         filter_complex=filter_complex,
         audio_filter=audio_filter,
+        extra_args=_build_quality_extra_args(preview),
     )

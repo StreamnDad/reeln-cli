@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import shutil
-from datetime import UTC, datetime
 from pathlib import Path
 
 from reeln.core.errors import MediaError
 from reeln.core.highlights import load_game_state, save_game_state
 from reeln.core.log import get_logger
 from reeln.models.game import GameState
+from reeln.native import get_native, json_to_state, state_to_json
 
 log: logging.Logger = get_logger(__name__)
 
@@ -35,8 +35,10 @@ def finish_game(
     if state.finished:
         raise MediaError("Game is already finished")
 
-    state.finished = True
-    state.finished_at = datetime.now(UTC).isoformat()
+    native = get_native()
+    state_json = state_to_json(state)
+    state_json = native.mark_finished(state_json)
+    state = json_to_state(state_json)  # type: ignore[assignment]
 
     if not dry_run:
         _relocated, reloc_messages = relocate_outputs(game_dir, state)
