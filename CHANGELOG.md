@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - "Choppy tracking" at `--zoom-frames 16+` — the kept keyframes after smoothing now lie on a smooth spline; previously a single outlier OpenAI prediction could survive the downsample and create a visible jump.
 - Goal renders now use the away team's roster when the event metadata says away, fixing the rendered overlay showing the wrong player names.
 - Render passes from the dock's queue now produce both selected profiles (e.g. player-overlay + slowmo) instead of silently keeping only the last `--render-profile` value.
+- Multi-profile renders no longer produce inconsistent framing between iterations: the speed-segments code path previously hard-coded a height-based crop-like scale even when the user picked `pad`, so the slowmo iteration filled the frame while the same-config `player-overlay` iteration letterboxed. Both paths now honor the same `crop_mode` setting and produce identical 1080×1920 framing for the same source.
 
 ## [0.0.39] - 2026-04-24
 

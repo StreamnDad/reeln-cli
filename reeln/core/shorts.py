@@ -592,10 +592,15 @@ def _build_speed_segments_chain(
     # Post-speed filters (applied after concat)
     post: list[str] = []
 
-    # Scale — PAD mode uses height-based scaling (same as smart pad) so
-    # landscape sources fill the frame vertically.  After scale, overflow
-    # crop clips the horizontal excess to target_width.
-    if effective_crop == CropMode.PAD:
+    # Scale + framing — must match the non-speed-segments ``build_filter_chain``
+    # path exactly so the same ``crop_mode`` produces the same dimensions on
+    # every iteration of a multi-profile render. Prior to the fix, this branch
+    # silently forced height-based scaling even for non-smart PAD, which made
+    # the slowmo iteration fill the frame while the player-overlay iteration
+    # letterboxed — the dock-reported "first iteration was small" bug.
+    if use_smart_pad:
+        # Smart pad needs the scaled video WIDER than the output (height-based
+        # scale) so the action can be panned horizontally across the frame.
         post.append(
             build_scale_filter(
                 crop_mode=CropMode.CROP,
@@ -604,20 +609,48 @@ def _build_speed_segments_chain(
                 scale=config.scale,
             )
         )
-        if not use_smart_pad:
+    elif effective_crop == CropMode.PAD:
+        # True letterbox: scale to fit width, then pad to fill height.
+        post.append(
+            build_scale_filter(
+                crop_mode=CropMode.PAD,
+                target_width=config.width,
+                target_height=config.height,
+                scale=config.scale,
+            )
+        )
+        if config.scale > 1.0:
+            # When zoomed in, overflow crop clips back to target dims so
+            # pad won't be given an oversized input.
             post.append(
                 build_overflow_crop_filter(
                     target_width=config.width,
                     target_height=config.height,
                 )
             )
+        post.append(
+            build_pad_filter(
+                target_width=config.width,
+                target_height=config.height,
+                pad_color=config.pad_color,
+            )
+        )
     else:
+        # Crop mode — scale by height, then a final crop fixes the width.
         post.append(
             build_scale_filter(
                 crop_mode=effective_crop,
                 target_width=config.width,
                 target_height=config.height,
                 scale=config.scale,
+            )
+        )
+        post.append(
+            build_crop_filter(
+                target_width=config.width,
+                target_height=config.height,
+                anchor_x=config.anchor_x,
+                anchor_y=config.anchor_y,
             )
         )
 

@@ -1049,21 +1049,52 @@ def test_build_speed_segments_filters_very_slow_speed() -> None:
 
 
 def test_build_filter_chain_speed_segments_pad(tmp_path: Path) -> None:
+    """Speed_segments + PAD must produce **true letterbox** matching the
+    non-speed-segments path, not a crop-like fill.
+
+    Regression for the dock-reported "first iteration was small" bug:
+    previously this branch forced height-based scale + overflow crop,
+    which made the slowmo iteration fill the frame while the non-slowmo
+    iteration on the same multi-profile render letterboxed. Now both
+    iterations produce identical 1080x1920 framing for the same source.
+    """
     segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
     cfg = _cfg(tmp_path, speed_segments=segs)
     chain, audio = build_filter_chain(cfg)
     # Video graph uses filter_complex with split/concat
     assert "split=2" in chain
     assert "concat=n=2:v=1:a=0" in chain
-    # Post-speed filters: height-based scale (like smart pad), overflow crop, pad
-    assert "scale=-2:1920:flags=lanczos" in chain
-    assert "min(iw,1080)" in chain  # overflow crop
+    # Post-speed filters now use width-based scale (letterbox), then pad.
+    # NOT the height-based scale + overflow crop that used to fill the frame.
+    assert "scale=1080:-2:flags=lanczos" in chain
     assert "pad=1080:1920" in chain
     # Audio also in filter_complex
     assert "asplit=2" in chain
     assert "concat=n=2:v=0:a=1" in chain
     # audio_filter is None (audio in filter_complex)
     assert audio is None
+
+
+def test_build_filter_chain_speed_segments_pad_matches_non_speed_segments(
+    tmp_path: Path,
+) -> None:
+    """The pad scale dimensions must match between speed_segments and the
+    regular path. Regression guard for the dock-reported inconsistency
+    where slowmo iterations filled the frame but player-overlay
+    iterations on the SAME render letterboxed."""
+    # Same config, only differ in whether speed_segments is set.
+    cfg_plain = _cfg(tmp_path)
+    cfg_speed = _cfg(
+        tmp_path,
+        speed_segments=(SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5)),
+    )
+    chain_plain, _ = build_filter_chain(cfg_plain)
+    chain_speed, _ = build_filter_chain(cfg_speed)
+    # Both should use width-based scale (= scale=1080:-2) and pad to 1080x1920.
+    assert "scale=1080:-2:flags=lanczos" in chain_plain
+    assert "scale=1080:-2:flags=lanczos" in chain_speed
+    assert "pad=1080:1920" in chain_plain
+    assert "pad=1080:1920" in chain_speed
 
 
 def test_build_filter_chain_speed_segments_crop(tmp_path: Path) -> None:
@@ -1196,12 +1227,17 @@ def test_build_filter_chain_speed_segments_smart_crop(tmp_path: Path) -> None:
 
 
 def test_build_filter_chain_speed_segments_pad_with_scale(tmp_path: Path) -> None:
+    """Pad + scale > 1.0: width-based scale (zoomed in), then overflow crop
+    clips back to target dims so the pad filter doesn't receive an
+    oversized input. Matches the non-speed-segments path exactly."""
     segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
     cfg = _cfg(tmp_path, speed_segments=segs, scale=1.3)
     chain, _ = build_filter_chain(cfg)
-    # Pad + scale > 1.0: height-based scale + overflow crop
+    # Width-based scale with scale factor: 1080 * 1.3 = 1404 (rounded even).
+    assert "scale=1404:-2:flags=lanczos" in chain
+    # Overflow crop clips back to target dims.
     assert "min(iw,1080)" in chain
-    assert "scale=-2:2496:flags=lanczos" in chain
+    assert "pad=1080:1920" in chain
 
 
 # ---------------------------------------------------------------------------
