@@ -245,6 +245,30 @@ def test_catmull_rom_short_input_passes_through() -> None:
     assert _catmull_rom_resample([(0.0, 0.5)], 10) == [(0.0, 0.5)]
 
 
+def test_catmull_rom_degenerate_time_range_passes_through() -> None:
+    """All identical timestamps would divide-by-zero; the guard returns
+    the input untouched."""
+    values = [(2.0, 0.1), (2.0, 0.4), (2.0, 0.9)]
+    assert _catmull_rom_resample(values, num_samples=10) == values
+
+
+def test_catmull_rom_handles_float_drift_timestamps() -> None:
+    """Timestamps with known float-comparison hazards (e.g. ``0.1 + 0.2``)
+    are tolerated: endpoints stay anchored exactly and interior samples
+    remain finite."""
+    values = [
+        (0.0, 0.0),
+        (0.1, 0.5),
+        (0.2, 0.5),
+        (0.30000000000000004, 0.5),  # 0.1 + 0.2 — classic float drift
+        (0.4, 0.0),
+    ]
+    result = _catmull_rom_resample(values, num_samples=200)
+    assert result[0] == values[0]
+    assert result[-1] == values[-1]
+    assert all(0.0 <= y <= 1.0 for _, y in result)
+
+
 def test_catmull_rom_produces_continuously_changing_velocity() -> None:
     """Velocity transitions through interior keyframes should be smooth.
 

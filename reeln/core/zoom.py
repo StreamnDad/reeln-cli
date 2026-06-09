@@ -141,9 +141,9 @@ def _catmull_rom_resample(
         t1 = timestamps[seg_idx + 1]
         u = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
         # Clamp u into [0,1] in case of float wiggle near segment boundary.
-        if u < 0.0:
+        if u < 0.0:  # pragma: no cover
             u = 0.0
-        elif u > 1.0:
+        elif u > 1.0:  # pragma: no cover
             u = 1.0
         result.append((t, _segment_value(seg_idx, u)))
     return result

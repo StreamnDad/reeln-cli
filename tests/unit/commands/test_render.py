@@ -5475,6 +5475,130 @@ def test_player_numbers_empty_team_colors_does_not_pass_home_colors(
     assert kwargs.get("home_colors") is None
 
 
+def test_player_numbers_event_id_provided_but_not_in_state(
+    tmp_path: Path,
+) -> None:
+    """``--event ev_unknown`` with no matching event in state falls back
+    to event-type prefix resolution rather than crashing."""
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    _write_game_state(game_dir, _game_state_with_level())  # no events
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+
+    cfg_data = {"render_profiles": {"overlay": {"subtitle_template": str(template)}}}
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    away_profile = TeamProfile(
+        team_name="Bears",
+        short_name="BRS",
+        level="bantam",
+        roster_path=str(roster_path),
+    )
+    load_team_profile_mock = MagicMock(return_value=away_profile)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", load_team_profile_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render", "short", str(clip),
+                "--player-numbers", "48",
+                "--event-type", "AWAY_GOAL",
+                "--event", "ev_unknown",
+                "--game-dir", str(game_dir),
+                "--render-profile", "overlay",
+                "--config", str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # Falls back to AWAY_GOAL prefix → away team profile.
+    load_team_profile_mock.assert_called_once_with("bantam", "bears")
+
+
+def test_player_numbers_event_metadata_team_non_string_falls_back(
+    tmp_path: Path,
+) -> None:
+    """Event metadata where ``team`` is missing / non-string is ignored
+    and the event-type prefix wins."""
+    from unittest.mock import MagicMock
+
+    from reeln.models.team import TeamProfile
+
+    game_dir = tmp_path / "game"
+    game_dir.mkdir()
+    state = _game_state_with_level()
+    state = GameState(
+        game_info=state.game_info,
+        created_at=state.created_at,
+        events=[
+            GameEvent(
+                id="ev_x",
+                clip="clip.mkv",
+                segment_number=1,
+                event_type="goal",
+                # Empty metadata so matching.metadata is falsy AND the
+                # falsy branch of the team-hint isinstance check both fire.
+                metadata={},
+            ),
+        ],
+    )
+    _write_game_state(game_dir, state)
+
+    clip = tmp_path / "clip.mkv"
+    clip.touch()
+    roster_path = tmp_path / "roster.csv"
+    _write_roster(roster_path)
+    template = tmp_path / "overlay.ass"
+    template.write_text("Player: {{goal_scorer_text}}", encoding="utf-8")
+    cfg_data = {"render_profiles": {"overlay": {"subtitle_template": str(template)}}}
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(cfg_data))
+
+    away_profile = TeamProfile(
+        team_name="Bears", short_name="BRS", level="bantam",
+        roster_path=str(roster_path),
+    )
+    load_team_profile_mock = MagicMock(return_value=away_profile)
+
+    with (
+        patch("reeln.core.ffmpeg.discover_ffmpeg", return_value=Path("/usr/bin/ffmpeg")),
+        patch("reeln.core.ffmpeg.probe_duration", return_value=10.0),
+        patch("reeln.core.teams.load_team_profile", load_team_profile_mock),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "render", "short", str(clip),
+                "--player-numbers", "48",
+                "--event-type", "AWAY_GOAL",
+                "--event", "ev_x",
+                "--game-dir", str(game_dir),
+                "--render-profile", "overlay",
+                "--config", str(cfg),
+                "--dry-run",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    load_team_profile_mock.assert_called_once_with("bantam", "bears")
+
+
 def test_player_numbers_event_id_missing_falls_back_to_event_type_prefix(
     tmp_path: Path,
 ) -> None:

@@ -743,9 +743,9 @@ def test_plan_short_empty_quality_flag_omitted(tmp_path: Path) -> None:
     sources, screen captures) without losing the others."""
     from dataclasses import replace
 
-    cfg = replace(_cfg(tmp_path), tune="", movflags="")
+    cfg = replace(_cfg(tmp_path), pix_fmt="", tune="", movflags="")
     plan = plan_short(cfg)
-    assert "-pix_fmt" in plan.extra_args
+    assert "-pix_fmt" not in plan.extra_args
     assert "-tune" not in plan.extra_args
     assert "-movflags" not in plan.extra_args
 

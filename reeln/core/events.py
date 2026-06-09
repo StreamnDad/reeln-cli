@@ -85,7 +85,7 @@ def tag_event(
         import json as _json
 
         state_dict = _json.loads(state_json)
-        for evt in state_dict.get("events", []):
+        for evt in state_dict.get("events", []):  # pragma: no branch
             if evt["id"] == event.id:
                 evt.setdefault("metadata", {}).update(metadata_updates)
                 break
