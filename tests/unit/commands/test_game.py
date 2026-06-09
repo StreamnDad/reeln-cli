@@ -2482,6 +2482,50 @@ def test_game_delete_confirmed(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# game set-tournament
+# ---------------------------------------------------------------------------
+
+
+def test_game_set_tournament_writes_to_state(tmp_path: Path) -> None:
+    import json as _json
+
+    game_dir = tmp_path / "2026-03-15_a_vs_b"
+    game_dir.mkdir()
+    (game_dir / "game.json").write_text(
+        _json.dumps({
+            "game_info": {
+                "home_team": "Eagles",
+                "away_team": "Bears",
+                "sport": "hockey",
+                "date": "2026-03-15",
+            },
+            "finished": False,
+            "segments_processed": [],
+            "events": [],
+            "renders": [],
+            "livestreams": {},
+            "created_at": "2026-03-15T18:00:00",
+        })
+    )
+
+    result = runner.invoke(
+        app, ["game", "set-tournament", "Stars Cup", "-o", str(game_dir)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Stars Cup" in result.output
+
+    persisted = _json.loads((game_dir / "game.json").read_text())
+    assert persisted["game_info"]["tournament"] == "Stars Cup"
+
+
+def test_game_set_tournament_config_error() -> None:
+    with patch("reeln.commands.game.load_config", side_effect=ReelnError("bad")):
+        result = runner.invoke(app, ["game", "set-tournament", "Stars Cup"])
+    assert result.exit_code == 1
+    assert "bad" in result.output
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

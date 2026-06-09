@@ -122,9 +122,13 @@ def test_short_config_defaults(tmp_path: Path) -> None:
     assert cfg.subtitle is None
     assert cfg.codec == "libx264"
     assert cfg.preset == "medium"
-    assert cfg.crf == 18
+    # Quality-pass defaults — keep aligned with VideoConfig.
+    assert cfg.crf == 16
     assert cfg.audio_codec == "aac"
     assert cfg.audio_bitrate == "128k"
+    assert cfg.tune == "film"
+    assert cfg.pix_fmt == "yuv420p"
+    assert cfg.movflags == "+faststart"
     assert cfg.smart_zoom_frames == 5
 
 

@@ -148,13 +148,17 @@ def build_overlay_context(
 
     # Team and level from base context — uppercase for visual emphasis.
     # When a tournament is configured, promote it to the title position
-    # and combine team/level into the secondary slot.
+    # and put the team in the secondary slot. The previous ``{team}/{level}``
+    # join overflowed the clip region behind the logo (e.g. "MACHINE
+    # ORANGE/2014" got clipped to "MACHINE ORANGE/2"); the tournament name
+    # already carries enough season/division context that we drop the level
+    # suffix here. Users who want it back can override the template.
     tournament = base.get("tournament", "").strip()
     team_name = (scoring_team if scoring_team is not None else base.get("home_team", "")).upper()
     level = base.get("level", "").upper()
     if tournament:
         goal_scorer_team = tournament.upper()
-        team_level = f"{team_name}/{level}" if level else team_name
+        team_level = team_name
     else:
         goal_scorer_team = team_name
         team_level = level

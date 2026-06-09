@@ -199,6 +199,18 @@ def test_tag_event_multiple_fields(tmp_path: Path) -> None:
     assert updated.player == "#17"
 
 
+def test_tag_event_metadata_skips_non_matching_events(tmp_path: Path) -> None:
+    """Metadata writer walks every event; non-matching ones are skipped
+    until the target event is reached and broken on."""
+    ev1 = _make_event("aaa")
+    ev2 = _make_event("bbb")
+    ev3 = _make_event("ccc")
+    _write_state(tmp_path, _make_state([ev1, ev2, ev3]))
+
+    updated = tag_event(tmp_path, "bbb", metadata_updates={"assists": ["#9"]})
+    assert updated.metadata == {"assists": ["#9"]}
+
+
 def test_tag_event_prefix_match(tmp_path: Path) -> None:
     ev = _make_event("abcdef123456")
     _write_state(tmp_path, _make_state([ev]))

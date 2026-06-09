@@ -592,10 +592,15 @@ def _build_speed_segments_chain(
     # Post-speed filters (applied after concat)
     post: list[str] = []
 
-    # Scale — PAD mode uses height-based scaling (same as smart pad) so
-    # landscape sources fill the frame vertically.  After scale, overflow
-    # crop clips the horizontal excess to target_width.
-    if effective_crop == CropMode.PAD:
+    # Scale + framing — must match the non-speed-segments ``build_filter_chain``
+    # path exactly so the same ``crop_mode`` produces the same dimensions on
+    # every iteration of a multi-profile render. Prior to the fix, this branch
+    # silently forced height-based scaling even for non-smart PAD, which made
+    # the slowmo iteration fill the frame while the player-overlay iteration
+    # letterboxed — the dock-reported "first iteration was small" bug.
+    if use_smart_pad:
+        # Smart pad needs the scaled video WIDER than the output (height-based
+        # scale) so the action can be panned horizontally across the frame.
         post.append(
             build_scale_filter(
                 crop_mode=CropMode.CROP,
@@ -604,20 +609,48 @@ def _build_speed_segments_chain(
                 scale=config.scale,
             )
         )
-        if not use_smart_pad:
+    elif effective_crop == CropMode.PAD:
+        # True letterbox: scale to fit width, then pad to fill height.
+        post.append(
+            build_scale_filter(
+                crop_mode=CropMode.PAD,
+                target_width=config.width,
+                target_height=config.height,
+                scale=config.scale,
+            )
+        )
+        if config.scale > 1.0:
+            # When zoomed in, overflow crop clips back to target dims so
+            # pad won't be given an oversized input.
             post.append(
                 build_overflow_crop_filter(
                     target_width=config.width,
                     target_height=config.height,
                 )
             )
+        post.append(
+            build_pad_filter(
+                target_width=config.width,
+                target_height=config.height,
+                pad_color=config.pad_color,
+            )
+        )
     else:
+        # Crop mode — scale by height, then a final crop fixes the width.
         post.append(
             build_scale_filter(
                 crop_mode=effective_crop,
                 target_width=config.width,
                 target_height=config.height,
                 scale=config.scale,
+            )
+        )
+        post.append(
+            build_crop_filter(
+                target_width=config.width,
+                target_height=config.height,
+                anchor_x=config.anchor_x,
+                anchor_y=config.anchor_y,
             )
         )
 
@@ -747,6 +780,24 @@ def _build_speed_segments_chain(
 # ---------------------------------------------------------------------------
 
 
+def _build_quality_extra_args(config: ShortConfig) -> list[str]:
+    """Assemble encoder quality flags for ``RenderPlan.extra_args``.
+
+    Adds ``-pix_fmt`` (player compatibility), ``-tune`` (motion handling
+    for the configured content type) and ``-movflags`` (web-streaming
+    moov-atom placement) when each is non-empty. Skipping a flag with an
+    empty string lets callers opt out per-render.
+    """
+    args: list[str] = []
+    if config.pix_fmt:
+        args.extend(["-pix_fmt", config.pix_fmt])
+    if config.tune:
+        args.extend(["-tune", config.tune])
+    if config.movflags:
+        args.extend(["-movflags", config.movflags])
+    return args
+
+
 def plan_short(
     config: ShortConfig,
     *,
@@ -771,6 +822,7 @@ def plan_short(
         audio_bitrate=config.audio_bitrate,
         filter_complex=filter_complex,
         audio_filter=audio_filter,
+        extra_args=_build_quality_extra_args(config),
     )
 
 
@@ -785,28 +837,17 @@ def plan_preview(config: ShortConfig) -> RenderPlan:
     # Ensure even dimensions
     preview_width += preview_width % 2
     preview_height += preview_height % 2
-    preview = ShortConfig(
-        input=config.input,
-        output=config.output,
+    # ``replace`` carries forward every field from ``config`` (including
+    # the encoder quality flags ``tune``/``pix_fmt``/``movflags``) so we
+    # only need to override what differs for a preview render.
+    from dataclasses import replace as _replace
+
+    preview = _replace(
+        config,
         width=preview_width,
         height=preview_height,
-        crop_mode=config.crop_mode,
-        anchor_x=config.anchor_x,
-        anchor_y=config.anchor_y,
-        scale=config.scale,
-        smart=config.smart,
-        pad_color=config.pad_color,
-        speed=config.speed,
-        speed_segments=config.speed_segments,
-        lut=config.lut,
-        subtitle=config.subtitle,
-        codec=config.codec,
         preset="ultrafast",
         crf=28,
-        audio_codec=config.audio_codec,
-        audio_bitrate=config.audio_bitrate,
-        branding=config.branding,
-        logo=config.logo,
     )
     filter_complex, audio_filter = build_filter_chain(preview)
     inputs: list[Path] = [preview.input]
@@ -824,4 +865,5 @@ def plan_preview(config: ShortConfig) -> RenderPlan:
         audio_bitrate=preview.audio_bitrate,
         filter_complex=filter_complex,
         audio_filter=audio_filter,
+        extra_args=_build_quality_extra_args(preview),
     )

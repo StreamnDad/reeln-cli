@@ -220,11 +220,16 @@ def init_game(
     # Persist livestream URLs written by plugins (e.g. Google, Meta)
     livestreams = ready_ctx.shared.get("livestreams", {})
     if livestreams:
+        from reeln.native import get_native, json_to_state, state_to_json
+
+        native = get_native()
         state = load_game_state(game_dir)
-        state.livestreams = dict(livestreams)
-        save_game_state(state, game_dir)
+        state_json = state_to_json(state)
         for platform, url in livestreams.items():
+            state_json = native.set_livestream(state_json, platform, str(url))
             messages.append(f"Livestream ({platform}): {url}")
+        state = json_to_state(state_json)  # type: ignore[assignment]
+        save_game_state(state, game_dir)
 
     messages.append(f"Created {_GAME_STATE_FILE}")
     log.info("Game initialized: %s", game_dir)
@@ -528,12 +533,17 @@ def process_segment(
         ffmpeg_command=list(cmd),
     )
 
-    # Update game state
-    state.events.extend(new_events)
-    if segment_number not in state.segments_processed:
-        state.segments_processed.append(segment_number)
-    if output.name not in state.segment_outputs:
-        state.segment_outputs.append(output.name)
+    # Update game state via reeln_native mutations
+    from reeln.models.game import game_event_to_dict
+    from reeln.native import get_native, json_to_state, state_to_json
+
+    native = get_native()
+    state_json = state_to_json(state)
+    for event in new_events:
+        state_json = native.add_event(state_json, json.dumps(game_event_to_dict(event)))
+    state_json = native.mark_segment_processed(state_json, segment_number)
+    state_json = native.set_segment_output(state_json, output.name)
+    state = json_to_state(state_json)  # type: ignore[assignment]
     save_game_state(state, game_dir)
 
     get_registry().emit(
@@ -667,9 +677,13 @@ def merge_game_highlights(
         ffmpeg_command=list(cmd),
     )
 
-    # Update game state
-    state.highlighted = True
-    state.highlights_output = output.name
+    # Update game state via reeln_native
+    from reeln.native import get_native, json_to_state, state_to_json
+
+    native = get_native()
+    state_json = state_to_json(state)
+    state_json = native.mark_highlighted(state_json, output.name)
+    state = json_to_state(state_json)  # type: ignore[assignment]
     save_game_state(state, game_dir)
 
     from reeln.plugins.hooks import Hook, HookContext

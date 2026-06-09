@@ -681,7 +681,9 @@ def test_plan_short_defaults(tmp_path: Path) -> None:
     assert plan.output == tmp_path / "out.mp4"
     assert plan.codec == "libx264"
     assert plan.preset == "medium"
-    assert plan.crf == 18
+    # Quality-pass default: lowered from 18 → 16. ShortConfig's default
+    # propagates through plan_short.
+    assert plan.crf == 16
     assert plan.width == 1080
     assert plan.height == 1920
     assert plan.filter_complex is not None
@@ -712,6 +714,59 @@ def test_plan_short_custom_encoding(tmp_path: Path) -> None:
     assert plan.crf == 22
     assert plan.audio_codec == "opus"
     assert plan.audio_bitrate == "192k"
+
+
+def test_plan_short_emits_quality_extra_args(tmp_path: Path) -> None:
+    """Quality-pass flags (pix_fmt / tune / movflags) flow into extra_args.
+
+    Regression for the user-reported "lower resolution / choppy" feel:
+    without ``-pix_fmt yuv420p`` browsers and social platforms can reject
+    or silently re-encode the file; without ``-tune film`` libx264 picks
+    motion estimation parameters tuned for the wrong content; without
+    ``-movflags +faststart`` web streamers stall on the first byte
+    waiting for the moov atom.
+    """
+    cfg = _cfg(tmp_path)
+    plan = plan_short(cfg)
+    # Each flag appears as a -k v pair in extra_args.
+    assert "-pix_fmt" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-pix_fmt") + 1] == "yuv420p"
+    assert "-tune" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-tune") + 1] == "film"
+    assert "-movflags" in plan.extra_args
+    assert plan.extra_args[plan.extra_args.index("-movflags") + 1] == "+faststart"
+
+
+def test_plan_short_empty_quality_flag_omitted(tmp_path: Path) -> None:
+    """An empty string for any quality field opts that flag out completely
+    so users can disable e.g. ``-tune`` for non-film content (animation
+    sources, screen captures) without losing the others."""
+    from dataclasses import replace
+
+    cfg = replace(_cfg(tmp_path), pix_fmt="", tune="", movflags="")
+    plan = plan_short(cfg)
+    assert "-pix_fmt" not in plan.extra_args
+    assert "-tune" not in plan.extra_args
+    assert "-movflags" not in plan.extra_args
+
+
+def test_plan_short_custom_quality_values(tmp_path: Path) -> None:
+    """Each quality flag is configurable per-render."""
+    from dataclasses import replace
+
+    cfg = replace(
+        _cfg(tmp_path),
+        tune="animation",
+        pix_fmt="yuv422p",
+        movflags="+faststart+rtphint",
+    )
+    plan = plan_short(cfg)
+    assert plan.extra_args[plan.extra_args.index("-tune") + 1] == "animation"
+    assert plan.extra_args[plan.extra_args.index("-pix_fmt") + 1] == "yuv422p"
+    assert (
+        plan.extra_args[plan.extra_args.index("-movflags") + 1]
+        == "+faststart+rtphint"
+    )
 
 
 def test_plan_short_validation_error(tmp_path: Path) -> None:
@@ -994,21 +1049,52 @@ def test_build_speed_segments_filters_very_slow_speed() -> None:
 
 
 def test_build_filter_chain_speed_segments_pad(tmp_path: Path) -> None:
+    """Speed_segments + PAD must produce **true letterbox** matching the
+    non-speed-segments path, not a crop-like fill.
+
+    Regression for the dock-reported "first iteration was small" bug:
+    previously this branch forced height-based scale + overflow crop,
+    which made the slowmo iteration fill the frame while the non-slowmo
+    iteration on the same multi-profile render letterboxed. Now both
+    iterations produce identical 1080x1920 framing for the same source.
+    """
     segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
     cfg = _cfg(tmp_path, speed_segments=segs)
     chain, audio = build_filter_chain(cfg)
     # Video graph uses filter_complex with split/concat
     assert "split=2" in chain
     assert "concat=n=2:v=1:a=0" in chain
-    # Post-speed filters: height-based scale (like smart pad), overflow crop, pad
-    assert "scale=-2:1920:flags=lanczos" in chain
-    assert "min(iw,1080)" in chain  # overflow crop
+    # Post-speed filters now use width-based scale (letterbox), then pad.
+    # NOT the height-based scale + overflow crop that used to fill the frame.
+    assert "scale=1080:-2:flags=lanczos" in chain
     assert "pad=1080:1920" in chain
     # Audio also in filter_complex
     assert "asplit=2" in chain
     assert "concat=n=2:v=0:a=1" in chain
     # audio_filter is None (audio in filter_complex)
     assert audio is None
+
+
+def test_build_filter_chain_speed_segments_pad_matches_non_speed_segments(
+    tmp_path: Path,
+) -> None:
+    """The pad scale dimensions must match between speed_segments and the
+    regular path. Regression guard for the dock-reported inconsistency
+    where slowmo iterations filled the frame but player-overlay
+    iterations on the SAME render letterboxed."""
+    # Same config, only differ in whether speed_segments is set.
+    cfg_plain = _cfg(tmp_path)
+    cfg_speed = _cfg(
+        tmp_path,
+        speed_segments=(SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5)),
+    )
+    chain_plain, _ = build_filter_chain(cfg_plain)
+    chain_speed, _ = build_filter_chain(cfg_speed)
+    # Both should use width-based scale (= scale=1080:-2) and pad to 1080x1920.
+    assert "scale=1080:-2:flags=lanczos" in chain_plain
+    assert "scale=1080:-2:flags=lanczos" in chain_speed
+    assert "pad=1080:1920" in chain_plain
+    assert "pad=1080:1920" in chain_speed
 
 
 def test_build_filter_chain_speed_segments_crop(tmp_path: Path) -> None:
@@ -1141,12 +1227,17 @@ def test_build_filter_chain_speed_segments_smart_crop(tmp_path: Path) -> None:
 
 
 def test_build_filter_chain_speed_segments_pad_with_scale(tmp_path: Path) -> None:
+    """Pad + scale > 1.0: width-based scale (zoomed in), then overflow crop
+    clips back to target dims so the pad filter doesn't receive an
+    oversized input. Matches the non-speed-segments path exactly."""
     segs = (SpeedSegment(speed=1.0, until=5.0), SpeedSegment(speed=0.5))
     cfg = _cfg(tmp_path, speed_segments=segs, scale=1.3)
     chain, _ = build_filter_chain(cfg)
-    # Pad + scale > 1.0: height-based scale + overflow crop
+    # Width-based scale with scale factor: 1080 * 1.3 = 1404 (rounded even).
+    assert "scale=1404:-2:flags=lanczos" in chain
+    # Overflow crop clips back to target dims.
     assert "min(iw,1080)" in chain
-    assert "scale=-2:2496:flags=lanczos" in chain
+    assert "pad=1080:1920" in chain
 
 
 # ---------------------------------------------------------------------------

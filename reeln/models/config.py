@@ -18,9 +18,28 @@ class VideoConfig:
     ffmpeg_path: str = "ffmpeg"
     codec: str = "libx264"
     preset: str = "medium"
-    crf: int = 18
+    # CRF 16 (down from 18) for short-form output — high-motion sports
+    # footage loses visible detail above 18 once it's been cropped/scaled
+    # for vertical aspect. The trade-off is roughly +30% file size for
+    # noticeably crisper motion.
+    crf: int = 16
     audio_codec: str = "aac"
     audio_bitrate: str = "128k"
+    # libx264 tune flag. ``film`` is correct for live-action sports;
+    # set to empty string ``""`` to skip the flag entirely (useful for
+    # animation, screen capture, or codecs that don't accept it).
+    tune: str = "film"
+    # H.264 pixel format. ``yuv420p`` is the only format every consumer
+    # player decodes reliably (browsers, iOS, Android, social platforms);
+    # libx264's default of ``yuv444p`` for high-bit-depth inputs causes
+    # silent compatibility failures on web embeds. Set to empty string to
+    # let libx264 pick.
+    pix_fmt: str = "yuv420p"
+    # ``+faststart`` moves the MP4 moov atom to the front of the file so
+    # streamers / browsers can begin playback before the full file
+    # downloads. No effect for non-MP4 outputs; set to empty string to
+    # opt out.
+    movflags: str = "+faststart"
 
 
 @dataclass

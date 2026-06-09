@@ -345,16 +345,21 @@ class TestBuildOverlayContext:
         assert result.get("goal_scorer_team") == "ROSEVILLE"
 
     def test_tournament_promotes_to_title(self) -> None:
+        """With a tournament, only the team name goes in the secondary
+        slot — the level suffix was dropped to fit the clip region
+        beside the logo. The tournament name carries enough season /
+        division context. Regression for the dock-reported "MACHINE
+        ORANGE/2" clipping behind the logo."""
         ctx = self._base_ctx(tournament="Presidents Cup")
         result = build_overlay_context(ctx, event_metadata={})
         assert result.get("goal_scorer_team") == "PRESIDENTS CUP"
-        assert result.get("team_level") == "ROSEVILLE/BANTAM"
+        assert result.get("team_level") == "ROSEVILLE"
 
     def test_tournament_with_scoring_team(self) -> None:
         ctx = self._base_ctx(tournament="Presidents Cup")
         result = build_overlay_context(ctx, event_metadata={}, scoring_team="Bears")
         assert result.get("goal_scorer_team") == "PRESIDENTS CUP"
-        assert result.get("team_level") == "BEARS/BANTAM"
+        assert result.get("team_level") == "BEARS"
 
     def test_tournament_without_level(self) -> None:
         ctx = self._base_ctx(tournament="Presidents Cup", level="")
