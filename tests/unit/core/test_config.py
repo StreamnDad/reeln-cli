@@ -171,7 +171,7 @@ def test_load_config_sets_active_config_path(tmp_path: Path) -> None:
     cfg_file.write_text(json.dumps({"config_version": 1, "sport": "hockey"}))
 
     load_config(path=cfg_file)
-    assert _cfg_mod._ACTIVE_CONFIG_PATH == cfg_file
+    assert cfg_file == _cfg_mod._ACTIVE_CONFIG_PATH
     assert _config_base_dir() == tmp_path
 
 

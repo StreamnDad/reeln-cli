@@ -200,7 +200,7 @@ def test_build_piecewise_lerp_smooths_only_above_downsample_threshold() -> None:
     values = [(float(i), float(i) / 10.0) for i in range(9)]
     result = build_piecewise_lerp(values, 9.0)
     # The expression should reference the EXACT input values
-    for _, v in values[1:-1]:
+    for _, _v in values[1:-1]:
         # Float formatted: each value should appear somewhere in the lerp
         # coefficients (or close to it after slope/intercept math)
         assert "if(" not in result  # still flat
@@ -270,7 +270,7 @@ def test_catmull_rom_produces_continuously_changing_velocity() -> None:
         abs(velocities[i + 1] - velocities[i]) for i in range(len(velocities) - 1)
     ]
     max_delta = max(deltas)
-    # 200 samples × 4s span. Smooth spline keeps per-step velocity-delta
+    # 200 samples x 4s span. Smooth spline keeps per-step velocity-delta
     # well below 0.5. Linear interpolation over the same input would
     # spike to ~1.6 at each keyframe corner.
     assert max_delta < 0.5, f"Catmull-Rom not smooth: max velocity delta {max_delta}"

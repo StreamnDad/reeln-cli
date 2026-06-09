@@ -168,7 +168,7 @@ def _smooth_and_downsample_for_lerp(
         return list(values)
     smoothed = _smooth_moving_average(values, window=3)
     # Dense enough that the downsampled 9 points land on a curve almost
-    # indistinguishable from the full spline — 5×max_points is plenty.
+    # indistinguishable from the full spline -- 5x max_points is plenty.
     dense_count = max(max_points * 5, 30)
     dense = _catmull_rom_resample(smoothed, dense_count)
     return _downsample(dense, max_points)
