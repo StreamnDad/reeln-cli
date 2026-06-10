@@ -59,6 +59,7 @@ def render_iterations(
     queue: bool = False,
     config_profile: str = "",
     scoring_team_colors: list[str] | None = None,
+    scoring_team_name: str | None = None,
 ) -> tuple[IterationResult, list[str]]:
     """Render *clip* through multiple profiles and concatenate the results.
 
@@ -135,6 +136,7 @@ def render_iterations(
                     base_ctx,
                     duration=iter_dur,
                     event_metadata=event_metadata,
+                    scoring_team=scoring_team_name,
                     has_logo=short_config is not None and short_config.logo is not None,
                     home_colors=scoring_team_colors,
                 )

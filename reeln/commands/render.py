@@ -665,6 +665,7 @@ def _do_short(
                     queue=queue,
                     config_profile=profile or "",
                     scoring_team_colors=_scoring_team_colors or None,
+                    scoring_team_name=_scoring_team_name,
                 )
             except ReelnError as exc:
                 typer.echo(f"Error: {exc}", err=True)
@@ -1270,6 +1271,7 @@ def apply_profile(
                 queue=queue_flag,
                 config_profile=profile or "",
                 scoring_team_colors=_scoring_team_colors or None,
+                scoring_team_name=_scoring_team_name,
             )
         except ReelnError as exc:
             typer.echo(f"Error: {exc}", err=True)
