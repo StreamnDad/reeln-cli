@@ -560,6 +560,57 @@ def test_event_metadata_enriches_context(tmp_path: Path) -> None:
     assert result.output == output
 
 
+def test_scoring_team_name_threads_into_overlay_context(tmp_path: Path) -> None:
+    """``scoring_team_name`` flows through to ``build_overlay_context`` so
+    iteration renders use the *scoring* team's name in the banner, not the
+    base context's ``home_team`` fallback. Regression for the user-reported
+    bug where an away goal rendered the home team's name (e.g. "MACHINE
+    ORANGE") while colours + logo correctly used the away team."""
+    clip = tmp_path / "clip.mkv"
+    clip.write_bytes(b"video")
+    output = tmp_path / "out.mp4"
+    config = _make_config()
+
+    iter0 = _iteration_temp(output, 0)
+
+    def fake_render(plan: object, **kwargs: object) -> RenderResult:
+        iter0.write_bytes(b"rendered")
+        return _mock_render_result(iter0)
+
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fake_build_overlay_context(
+        base_ctx: TemplateContext, **kwargs: object
+    ) -> TemplateContext:
+        captured_kwargs.append(kwargs)
+        return base_ctx
+
+    with (
+        patch(f"{_MOD}.FFmpegRenderer") as MockRenderer,
+        patch("reeln.core.ffmpeg.probe_duration", return_value=8.0),
+        patch("reeln.core.overlay.build_overlay_context", side_effect=fake_build_overlay_context),
+        patch(f"{_MOD}.run_ffmpeg"),
+    ):
+        mock_instance = MagicMock()
+        mock_instance.render.side_effect = fake_render
+        MockRenderer.return_value = mock_instance
+
+        ctx = TemplateContext(variables={"home_team": "Machine Orange"})
+        render_iterations(
+            clip,
+            ["fullspeed"],
+            config,
+            Path("/usr/bin/ffmpeg"),
+            output,
+            context=ctx,
+            event_metadata={"assists": []},
+            scoring_team_name="Nodak Knights",
+        )
+
+    assert captured_kwargs, "build_overlay_context was not called"
+    assert captured_kwargs[0].get("scoring_team") == "Nodak Knights"
+
+
 def test_event_metadata_none_no_enrichment(tmp_path: Path) -> None:
     """When event_metadata is None, no overlay enrichment happens."""
     clip = tmp_path / "clip.mkv"
